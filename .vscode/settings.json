@@ -1,0 +1,13 @@
+{
+  "material-icon-theme.folders.customClones": [
+    {
+      "name": "deploy",
+      "base": "simulations",
+      "color": "purple-500",
+      "lightColor": "purple-700",
+      "folderNames": ["deploy"]
+    }
+  ],
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
+  "python-envs.defaultPackageManager": "ms-python.python:conda"
+}

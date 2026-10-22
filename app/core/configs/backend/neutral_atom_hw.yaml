@@ -1,0 +1,6 @@
+name: "neutral_atom_hw"
+params:
+  min_amplitude: 0.0
+  max_amplitude: 20.0
+  params_per_atom: 1
+  max_atoms: 20

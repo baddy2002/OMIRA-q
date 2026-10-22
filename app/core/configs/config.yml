@@ -1,0 +1,14 @@
+project_name: "OMIRA-q"
+
+paths:
+  input_dir: "data/input"
+  output_dir: "data/output"
+  preprocessed_input_dir: "data/input/preprocessed"
+  preprocessed_output_dir: "data/output/preprocessed"
+  models_output_dir: "data/output/models"
+
+datasets:
+  nci60: "app/core/configs/data/nci.yaml"
+  
+use_legacy_api_loader: False
+exclude_panels: ["FIB", "LYM", "MIS", "RHT", "SAR", "SCL"]

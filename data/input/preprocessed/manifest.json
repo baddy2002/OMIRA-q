@@ -1,0 +1,61 @@
+{
+  "config": {
+    "dataset": {
+      "name": "NCI-60",
+      "raw_file": "DTP_NCI60_RAW.xlsx",
+      "full_csv": "nci60_full_dataset.csv"
+    },
+    "preprocess": {
+      "chemistry": {
+        "allowed_elements": [
+          "C",
+          "N",
+          "O",
+          "F",
+          "P",
+          "S",
+          "Cl",
+          "Br"
+        ],
+        "n_heavy_min": 8,
+        "n_heavy_max": 20,
+        "max_degree": 4,
+        "value_range": [
+          4.0,
+          8.0
+        ],
+        "threshold": 5.0,
+        "ambiguity_margin": 0.0
+      },
+      "quantum_hardware": {
+        "max_stress_2d": 0.15,
+        "min_interatomic_dist_um": 5.0,
+        "max_register_radius_um": 70.0
+      },
+      "tasks": {
+        "min_samples_per_task": 500,
+        "n_tasks": 6
+      },
+      "split": {
+        "strategy": "scaffold",
+        "fractions": [
+          0.8,
+          0.1,
+          0.1
+        ],
+        "seed": 42,
+        "max_molecules": null
+      }
+    }
+  },
+  "tasks": [
+    "BR:MCF7",
+    "BR:MDA-MB-468",
+    "BR:T-47D",
+    "LE:CCRF-CEM",
+    "LE:HL-60(TB)",
+    "LE:SR"
+  ],
+  "n_final": 14136,
+  "config_hash": "0fdb83a5447f"
+}

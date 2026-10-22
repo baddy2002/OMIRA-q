@@ -1,0 +1,18 @@
+name: "egnn3"
+family: "neural"
+params:
+  hidden_dim: 128 
+  num_layers: 3
+  edge_features: 1
+  dropout: 0.1
+  num_tasks: 6
+  num_node_features: 12
+  num_edge_features: 7
+  use_morgan_fingerprint: True
+  fingerprint_n_bits: 4 
+training:
+  epochs: 200
+  lr: 0.001
+  weight_decay: 0.00001
+  patience: 20
+  batch_size: 64
