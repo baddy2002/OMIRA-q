@@ -1,0 +1,7 @@
+name: "neutral_atom_sim"
+params:
+  use_noise: False
+  min_amplitude: 0.0
+  max_amplitude: 12.566
+  params_per_atom: 1
+  max_atoms: 8

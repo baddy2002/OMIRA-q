@@ -1,0 +1,67 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[utf8]{utf8}
+\usepackage[italic]{babel} % Per la lingua italiana
+\usepackage{graphicx}
+\usepackage{amsmath, amsfonts, amssymb}
+\usepackage{booktabs} % Per tabelle professionali
+\usepackage{hyperref} % Gestione link e riferimenti
+\usepackage{cite}     % Gestione corretta citazioni numeriche con BibTeX
+
+\title{\textbf{OMIRA-q: Quantitative Structure-Activity Relationship Virtual Screening via Graph Neural Networks and Quantum Machine Learning}}
+\author{\textbf{Andrea Benassi}}
+\date{Settembre 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Il presente documento descrive la struttura teorica e metodologica del progetto \textbf{OMIRA-q}. L'obiettivo primario è la costruzione di una pipeline di \emph{Virtual Screening} ad alte prestazioni per la predizione dell'attività antitumorale di molecole a partire dalla loro sola struttura chimica. Vengono messi a confronto un modello baseline non-neurale (XGBoost), una rete Graph Attention Network v2 (GATv2) e una Graph Neural Network equivariante $E(n)$ (EGNN). Viene inoltre definita la strategia per la formulazione del task di classificazione su base \emph{cell-line specific} a partire dal dataset NCI-60 e per la successiva integrazione con algoritmi di Quantum Machine Learning.
+\end{abstract}
+
+\section{Introduzione}
+Lo screening virtuale basato su relazioni quantitative struttura-attività (\emph{Quantitative Structure-Activity Relationship}, QSAR) rappresenta uno dei pilastri fondamentali della chemioinformatica moderna. L'obiettivo consiste nel predire l'attività biologica di composti chimici non ancora sintetizzati o testati sperimentalmente, accelerando drasticamente le prime fasi del processo di discovery farmaceutico.
+
+\section{Obiettivi del progetto}
+Il progetto \textbf{OMIRA-q} si propone i seguenti obiettivi chiave:
+\begin{enumerate}
+    \item \textbf{Benchmarking di Modelli ML/GNN}: Confrontare architetture di classificazione che operano su livelli di rappresentazione molecolare progressivamente più complessi:
+    \begin{itemize}
+        \item Baseline tabellare (XGBoost su descrittori molecolari e fingerprint ECFP4);
+        \item Graph Attention Network v2 (\textbf{GATv2}), in grado di apprendere l'importanza relativa delle connessioni atomiche nel grafo 2D;
+        \item Equivariant Graph Neural Network (\textbf{EGNN(3)}), per l'integrazione nativa delle simmetrie geometriche $E(3)$ e delle conformazioni 3D dei composti.
+    \end{itemize}
+    \item \textbf{Formulazione Multi-Task Realistica}: Modellare l'attività antitumorale non come un singolo valore generico, ma come risposta specifica a linee cellulari tumorali ben definite.
+    \item \textbf{Integrazione Quantistica (Fase Successiva)}: Estendere la pipeline alla simulazione su dispositivi quantistici mediante l'apprendimento di matrici di adiacenza parametrizzate su gruppi di Lie $SU(2^n)$ via Reinforcement Learning (RL).
+\end{enumerate}
+
+\section{Motivazione e Modellazione del Dataset NCI-60}
+È stato scelto il dataset NCI-60 del Developmental Therapeutics Program del National Cancer Institute (NCI/DTP) \cite{shoemaker2006nci60}. Tale dataset raccoglie misure di inibizione della crescita cellulare per decine di migliaia di composti valutati su un pannello di 60 linee cellulari tumorali umane.
+
+\subsection{Costruzione del Grafo e Feature Engineering}
+Rispetto a benchmark accademici pre-costruiti come NCI-1 ed NCI-109 \cite{wale2008nci1} — nei quali ogni nodo del grafo porta come unica feature il simbolo atomico — il dataset NCI-60 grezzo (identificativi PubChem SID e SMILES) consente di generare i grafi molecolari tramite RDKit \cite{rdkit}. Questo permette di definire esplicitamente:
+\begin{*itemize}
+    \item \textbf{Feature di Nodo (Atomi)}: Numero atomico, stato di ibridazione, carica formale, aromaticità, grado di coordinazione e idrogeni impliciti;
+    \item \textbf{Feature di Arco (Legami)}: Ordine di legame (singolo, doppio, triplo, aromatico), coniugazione e stereochimica.
+\end{*itemize}
+
+\subsection{Definizione delle Label e Formulazione del Task}
+Nelle tabelle NCI-60 non esiste un singolo valore isolato di $GI_{50}$; i dati si articolano su 60 colonne, ciascuna corrispondente alla risposta registrata per una specifica linea cellulare espresso in scala $-\log_{10}(GI_{50})$.
+
+Invece di aggregare tali misure tramite mediana o media — operazione che cancellerebbe la specificità d'organo del farmaco —, il progetto adotta una formulazione \textbf{Multi-Task / Multi-Label Cell-Line Specific}. La label binaria di attività $y_{i, k} \in \{0, 1\}$ per la molecola $i$ e la linea cellulare $k$ viene calcolata secondo la regola:
+\begin{equation}
+y_{i, k} = 
+\begin{cases} 
+1 & \text{se } -\log_{10}(GI_{50, i, k}) \geq 5.0 \quad (GI_{50} \le 10\,\mu M) \\
+0 & \text{se } -\log_{10}(GI_{50, i, k}) < 5.0 \quad (GI_{50} > 10\,\mu M) \\
+\text{NaN} & \text{se dato sperimentale assente}
+\end{cases}
+\end{equation}
+La soglia di $10\,\mu M$ garantisce piena aderenza con i criteri di validazione del National Cancer Institute e con le linee guida per la scoperta di agenti citotossici attivi \cite{jnp_guidelines}. Il valore di $GI_{50}$ viene utilizzato esclusivamente per derivare la label di training e mai fornito al modello come feature di input, prevenendo qualsiasi forma di \emph{data leakage}.
+
+In presenza di limiti computazionali o per la successiva esecuzione su circuiti quantistici (QML), il task potrà essere ridotto ad un sottoinsieme bilanciato di $K$ linee cellulari primarie (es. $K \in \{3, 5\}$) selezionate in base alla copertura dei dati ed alla rilevanza clinica.
+
+\bibliographystyle{unsrt} % Stile numerico ordinato per comparsa
+\bibliography{OMIRA-q}   % Richiama il file OMIRA-q.bib
+
+\end{document}

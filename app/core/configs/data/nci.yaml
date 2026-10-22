@@ -1,0 +1,34 @@
+dataset:
+  name: "NCI-60"
+  raw_file: "DTP_NCI60_RAW.xlsx"
+  full_csv: "nci60_full_dataset.csv"
+
+preprocess:
+  chemistry:
+    allowed_elements: ["C", "N", "O", "F", "P", "S", "Cl", "Br"]
+    n_heavy_min: 8
+    n_heavy_max: 20             # non può essere maggiore di max_atoms negli yaml backend quantistici
+    max_degree: 4
+    value_range: [4.0, 8.0]     # -log10(GI50) min e max fisici
+    threshold: 5.0              # Soglia di attivita (10 uM)
+    ambiguity_margin: 0.0
+
+  quantum_hardware:
+    max_stress_2d: 0.15         # Stress-1 di Kruskal per l'embedding 2D (Pasqal/Pulser)
+    min_interatomic_dist_um: 5.0 # Distanza minima in micrometri per trappola laser
+    max_register_radius_um: 70.0
+
+  tasks:
+    min_samples_per_task: 500
+    n_tasks: 6                   # Numero di linee cellulari target
+    #target_cell_lines:           # Opzionale: override manuale se non si usa greedy phi
+    #  - "BR:MCF7"
+    #  - "CO:HCT-116"
+    #  - "CNS:U251"
+    #  - "LE:SR"
+
+  split:
+    strategy: "scaffold"         # Murcko Scaffold Split
+    fractions: [0.8, 0.1, 0.1]   # train, val, test
+    seed: 42
+    max_molecules: null          # null per usare tutte le molecole filtrate

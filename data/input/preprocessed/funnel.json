@@ -1,0 +1,87 @@
+[
+  {
+    "step": "standardize_table",
+    "in": 59877,
+    "out": 59877,
+    "reasons": {},
+    "n_tasks": 137
+  },
+  {
+    "step": "value_range",
+    "in": 3354581,
+    "out": 3325500,
+    "reasons": {
+      "out_of_range_uncensored": 27594,
+      "censored_undetermined": 1487
+    },
+    "range": [
+      4.0,
+      8.0
+    ],
+    "threshold": 5.0
+  },
+  {
+    "step": "standardize",
+    "in": 59877,
+    "out": 59161,
+    "reasons": {
+      "smiles_invalid": 714,
+      "standardize_failed": 2
+    },
+    "frag_changed": 739,
+    "uncharged": 196
+  },
+  {
+    "step": "dedup",
+    "in": 59161,
+    "out": 57602,
+    "reasons": {
+      "duplicate": 1559
+    },
+    "dup_groups": 903,
+    "dup_label_conflict_groups": 877,
+    "dup_label_conflict_cells": 41533
+  },
+  {
+    "step": "chemistry",
+    "in": 57602,
+    "out": 14346,
+    "reasons": {
+      "n_heavy_out_of_range": 41627,
+      "element_not_allowed": 1628,
+      "degree_too_high": 1
+    }
+  },
+  {
+    "step": "no_label",
+    "in": 14346,
+    "out": 14257,
+    "reasons": {
+      "no_label_in_tasks": 89
+    }
+  },
+  {
+    "step": "conformer",
+    "in": 14257,
+    "out": 14246,
+    "reasons": {
+      "conformer_failed": 11
+    }
+  },
+  {
+    "step": "stress_2d",
+    "in": 14246,
+    "out": 14136,
+    "reasons": {
+      "stress_2d_too_high": 110
+    }
+  },
+  {
+    "step": "subsample",
+    "in": 14136,
+    "out": 14136,
+    "reasons": {},
+    "requested_max": null,
+    "applied": false
+  }
+]
