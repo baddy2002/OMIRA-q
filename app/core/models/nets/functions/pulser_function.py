@@ -240,7 +240,7 @@ class PulserFunction():#torch.autograd.Function):
                 return SVConfig(
                     observables=[StateResult()],
                     #observables=[BitStrings(num_shots=50)],
-                    options={"nsteps": 50000},             
+                    #options={"nsteps": 50000},             
                 )
         else:
             raise NotImplementedError("Real QPU training not implemented")

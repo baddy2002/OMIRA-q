@@ -95,7 +95,7 @@ def _simulate_single_smiles_reservoir(smi: str, params: dict) -> list[float]:
     # esecuzione con StateResult
     config = SVConfig(
         observables=[StateResult()],
-        options={"nsteps": 25000}
+        #options={"nsteps": 25000}
     )
     backend = SVBackend(sequence=seq, config=config, mimic_qpu=True)
     results = backend.run()
