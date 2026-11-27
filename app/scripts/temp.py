@@ -8,6 +8,8 @@ import numpy as np
 import torch
 from torch_geometric.loader import DataLoader
 
+from app.core.utils import backend
+
 # Importa dinamicamente lo script 03 esistente
 script03 = importlib.import_module("app.scripts.03_classical_train_and_compare")
 
@@ -36,7 +38,7 @@ def run_neural_cotraining(train_df, val_df, test_df, task_cols, seed: int, model
 
     # 2. Inizializzazione modello
     net = script03.define_target_neural_net(model_name, backend_name, dataset_name)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = backend.get_optimal_device()
     net.to(device)
 
     # SEPARAZIONE NETTA DEGLI OPTIMIZER 

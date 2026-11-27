@@ -31,7 +31,7 @@ un revisore teorico ti smonterà il lavoro scrivendo:
   jacobiana del circuito quantistico; i risultati positivi potrebbero essere
   dovuti unicamente alla GNN sottostante, non al quantum layer"
 
-  - Surrogate Modeling: rete neurale ausiliaria che apprende a imitare l'input-output del simulatore QuTiP
+  - Surrogate Modeling: rete neurale ausiliaria che apprende a imitare l'input-output del simulatore quantistico
   - Ottimizzazione Ibrida: 
         - la GNN estrae le feature topologiche globali della molecola
         - algoritmo di ottimizzazione gradient-free (come CMA-ES o Bayesian Optimization) calcola i parametri ottimali dei impulsi laser per una classe di molecole, mentre la testa classica fa la classificazione fine.

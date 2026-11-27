@@ -6,7 +6,7 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from pulser import Pulse
-from pulser.backends import QutipBackendV2
+from emu_sv import SVBackend, SVConfig
 import torch
 from rdkit import Chem
 
@@ -16,8 +16,8 @@ from pulser.sequence import Sequence
 from pulser.waveforms import BlackmanWaveform, RampWaveform
 from pulser.backend import StateResult
 from pulser_simulation.simresults import SimulationResults
-from pulser_simulation.qutip_config import QutipConfig
 from app.core.configs.configger import PipelineConfigger
+from app.core.utils.backend import get_optimal_device
 logger = logging.getLogger(__name__)
 
 configger = PipelineConfigger()
@@ -91,13 +91,13 @@ def _simulate_single_smiles_reservoir(smi: str, params: dict) -> list[float]:
     # waveform di detuning dal min al max in modo lineare
     det_wf = RampWaveform(pulse_duration, start=start_det, stop=stop_det)
     seq.add(Pulse(amp_wf, det_wf, phase=0.0), "rydberg_global")
-
+    is_gpu = get_optimal_device().type in ["cuda", "mps"]
     # esecuzione con StateResult
-    config = QutipConfig(
+    config = SVConfig(
         observables=[StateResult()],
         options={"nsteps": 25000}
     )
-    backend = QutipBackendV2(sequence=seq, config=config, mimic_qpu=True)
+    backend = SVBackend(sequence=seq, config=config, mimic_qpu=True)
     results = backend.run()
 
     if hasattr(results, "get_final_state"):

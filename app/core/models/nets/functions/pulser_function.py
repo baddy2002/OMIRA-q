@@ -7,10 +7,11 @@ from functools import partial
 from pulser import Register, Sequence, Pulse
 from pulser.backend import NoiseModel, StateResult
 from pulser.backend import BitStrings
-from pulser_simulation import QutipBackendV2, QutipConfig
+from emu_sv import SVBackend, SVConfig
 from pulser.register import RectangularLatticeLayout
 from pulser.waveforms import CustomWaveform
 
+from app.core.utils import backend
 from app.core.utils.parallel_utils import ExecutorSingleton
 
 logger = logging.getLogger("PulserFunction")
@@ -224,22 +225,22 @@ class PulserFunction():#torch.autograd.Function):
         return pulse
 
     @staticmethod
-    def build_qutip_config(backend_name, noise_model):
+    def build_sv_config(backend_name, noise_model):
         if backend_name == 'neutral_atom_sim':
             # Usa la signature corretta per evitare AttributeError su samples_per_run
             if noise_model is not None:
-                return QutipConfig(
+                return SVConfig(
                     noise_model=noise_model,
                     prefer_device_noise_model=True,
                     observables=[StateResult()],
                     #observables=[BitStrings(num_shots=50)],
-                    options={"nsteps": 50000}
+                    options={"nsteps": 50000},
                 )
             else:
-                return QutipConfig(
+                return SVConfig(
                     observables=[StateResult()],
                     #observables=[BitStrings(num_shots=50)],
-                    options={"nsteps": 50000}
+                    options={"nsteps": 50000},             
                 )
         else:
             raise NotImplementedError("Real QPU training not implemented")
@@ -263,8 +264,8 @@ class PulserFunction():#torch.autograd.Function):
             phase_param_size
         )
 
-        config = PulserFunction.build_qutip_config(backend_name, noise_model)
-        backend = QutipBackendV2(sequence=seq, config=config, mimic_qpu=True)
+        config = PulserFunction.build_sv_config(backend_name, noise_model)
+        backend = SVBackend(sequence=seq, config=config, mimic_qpu=True)
         results = backend.run()
         logger.debug(f"results: {results}")
         if hasattr(results, "get_final_state"):
@@ -320,12 +321,45 @@ class PulserFunction():#torch.autograd.Function):
                 trap_depth=100.0
             )
 
+        classical_device = backend.get_optimal_device()
+        is_gpu = classical_device.type in ["cuda", "mps"]
+
         # Preparazione worker forward indicizzando correttamente il singolo campione [b]
-        tasks = []
         x_proj_np = x_projected.detach().cpu().numpy()
         mask_np = mask.detach().cpu().numpy()
         qubit_pos_np = qubit_positions.detach().cpu().numpy()
+        if not is_gpu:
+            logger.info(f"--- [FORWARD QPU/SIM] Esecuzione parallela su CPU (max_workers={executor._max_workers}) ---")
+            outputs = PulserFunction.handle_cpu_forward(
+                batch_size, x_proj_np, mask_np, qubit_pos_np, device, backend_params, waves_size, phase_param_size, backend_name, noise_model, num_qubits, qubit_max_origin_distance, qubit_min_distance, max_layout_fill_factor, executor
+            )
+        else:
+            logger.info(f"--- [FORWARD QPU/SIM] Esecuzione sequenziale su GPU (device={classical_device}) ---")
+            outputs = []
+            for b in range(batch_size):
+                res = PulserFunction.simulate_single(
+                    x_projected_sample=x_proj_np[b],
+                    mask_sample=mask_np[b],
+                    device=device,
+                    backend_params=backend_params,
+                    waves_size=waves_size,
+                    phase_param_size=phase_param_size,
+                    backend_name=backend_name,
+                    noise_model=noise_model,
+                    num_qubits=num_qubits,
+                    qubit_positions_embedding_sample=qubit_pos_np[b],
+                    qubit_max_origin_distance=qubit_max_origin_distance,
+                    qubit_min_distance=qubit_min_distance,
+                    max_layout_fill_factor=max_layout_fill_factor
+                )
+                outputs.append(res)
+                logger.debug(f"[FORWARD] Completata molecola {b+1}/{batch_size} | mean_prob: {np.mean(res):.3f}")
+        out_tensor = torch.tensor(np.array(outputs), device=x_projected.device, dtype=torch.float32)
+        #ctx.save_for_backward(x_projected, mask, qubit_positions, out_tensor)
+        return out_tensor
 
+    def handle_cpu_forward(batch_size, x_proj_np, mask_np, qubit_pos_np, device, backend_params, waves_size, phase_param_size, backend_name, noise_model, num_qubits, qubit_max_origin_distance, qubit_min_distance, max_layout_fill_factor, executor):
+        tasks = []
         for b in range(batch_size):
             simulate_fn = partial(
                 PulserFunction.simulate_single,
@@ -364,11 +398,9 @@ class PulserFunction():#torch.autograd.Function):
         except Exception as e:
             logger.error(f"unexpected error: {e}")
             raise RuntimeError(f"errore inaspettato nel forward pass del layer di classificazione pulser:  {e}")
+        return outputs
 
-        out_tensor = torch.tensor(np.array(outputs), device=x_projected.device, dtype=torch.float32)
-        #ctx.save_for_backward(x_projected, mask, qubit_positions, out_tensor)
-        return out_tensor
-
+    
     @staticmethod
     def extract_statevector_features(final_state, num_qubits):
         """

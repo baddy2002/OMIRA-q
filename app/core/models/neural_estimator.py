@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from app.core.models.history import History
 from app.core.models.base_estimator import Estimator
 from app.core.pipelines.fit.neural_trainer import NeuralTrainer
+from app.core.utils import backend
 
 
 class NeuralEstimator(Estimator):
@@ -20,7 +21,7 @@ class NeuralEstimator(Estimator):
     def __init__(self, model: nn.Module, config: dict, backend_name: str, ranking_fn=None) -> None:
         self.model = model
         self.config = config
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = backend.get_optimal_device()
         
         lr = config.get("training", {}).get("lr", 1e-3)
         weight_decay = config.get("training", {}).get("weight_decay", 1e-5)

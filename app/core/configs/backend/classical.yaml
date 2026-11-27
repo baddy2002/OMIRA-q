@@ -1,3 +1,4 @@
 name: "classical"
 #TODO: eventuale ottimizzazioni GPU?
 params:
+  infrastructure: "kaggle"

@@ -28,7 +28,7 @@ class QuantumKernelClassifier:
         K = np.zeros((n_a, n_b), dtype=np.float32)
         for i in range(n_a):
             for j in range(n_b):
-                # Fidelity tra due statevector QuTiP
+                # Fidelity tra due statevector
                 psi_a = states_A[i]
                 psi_b = states_B[j]
                 K[i, j] = np.abs(np.vdot(psi_a, psi_b)) ** 2
