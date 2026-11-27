@@ -1,0 +1,3 @@
+name: "dwave_sim"
+params:
+  use_noise: False

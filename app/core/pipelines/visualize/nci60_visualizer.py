@@ -11,25 +11,37 @@ logger = logging.getLogger(__name__)
 
 
 class NCI60Visualizer(BaseVisualizer):
-    """Visualizzatore per l'Exploratory Data Analysis (EDA) sul dataset NCI-60 (Supporta Tidy/Melted e Preprocessed Wide)."""
+    """
+    Visualizzatore per l'Exploratory Data Analysis (EDA) sul dataset NCI-60 
+    Supporta Tidy/Melted e Preprocessed Wide).
+    """
 
-    def __init__(self, output_dir: str | Path = "data/output"):
+    def __init__(self, output_dir: str | Path = "data/output", threshold: float = 5.0):
         super().__init__(output_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         # Impostazioni grafiche Seaborn
         sns.set_theme(style="whitegrid", palette="muted")
+        self.threshold = threshold
 
     def plot_distributions(self, df: pd.DataFrame) -> None:
+        """
+        stampa grafici per capire: 
+         - quanti esempi ci sono per ogni linea
+         - quanti di questi sono attivi o inattivi
+         - i valori di GI50 presenti nel dataset per indagare su soglie di default o altri valori sospetti
+        """
+        # prendi valori GI50 per tutte le linee
         cols = [c for c in df.columns if c.startswith("pGI50_")]
         if not cols:
             logger.info("Nessuna colonna pGI50_ trovata. Skip distribuzioni.")
             return
 
+        # metti le linee in righe
         long = df[cols].melt(var_name="Linea", value_name="pGI50").dropna()
         long["Linea"] = long["Linea"].str.replace("pGI50_", "", regex=False)
 
-        # 1. coverage per linea
+        # numero campioni testati su ogni linea
         cov = long.groupby("Linea").size().sort_values(ascending=False)
         fig, ax = plt.subplots(figsize=(14, 6))
         sns.barplot(x=cov.index, y=cov.values, color="skyblue", ax=ax)
@@ -40,18 +52,18 @@ class NCI60Visualizer(BaseVisualizer):
         fig.savefig(self.output_dir / "eda_coverage_per_cell_line.png", dpi=300)
         plt.close(fig)
 
-        # 2. distribuzione globale di pGI50, con soglia > 5 (regola di progetto)
+        # istogramma con i valori di gi50
         fig, ax = plt.subplots(figsize=(10, 5))
         sns.histplot(long["pGI50"], bins=50, kde=True, color="teal", ax=ax)
-        ax.axvline(x=5.0, color="red", linestyle="--", label="Soglia pGI50 = 5")
+        ax.axvline(x=self.threshold, color="red", linestyle="--", label="Soglia pGI50 = 5")
         ax.set_xlabel("pGI50")
         ax.legend()
         fig.tight_layout()
         fig.savefig(self.output_dir / "eda_gi50_global_distribution.png", dpi=300)
         plt.close(fig)
 
-        # 3. percentuale di attivi per linea (attivo: pGI50 > 5)
-        active = long.assign(attivo=lambda d: d["pGI50"] > 5.0).groupby("Linea")["attivo"].mean() * 100
+        # percentuale composti attivi per ogni linea cellulare
+        active = long.assign(attivo=lambda d: d["pGI50"] > self.threshold).groupby("Linea")["attivo"].mean() * 100
         active = active.sort_values(ascending=False)
         fig, ax = plt.subplots(figsize=(14, 6))
         sns.barplot(x=active.index, y=active.values, color="salmon", ax=ax)
@@ -63,6 +75,9 @@ class NCI60Visualizer(BaseVisualizer):
         plt.close(fig)
 
     def plot_correlations(self, df: pd.DataFrame) -> None:
+        """
+        stampa grafico di correlazione tra le prime 15 linee
+        """
         cols = [c for c in df.columns if c.startswith("pGI50_")]
         if len(cols) < 2:
             logger.info("Meno di due linee: skip matrice di correlazione.")
@@ -71,7 +86,7 @@ class NCI60Visualizer(BaseVisualizer):
         # campione delle prime 15 linee, per leggibilità
         sample = df[cols[:15]].copy()
         sample.columns = [c.replace("pGI50_", "", 1) for c in sample.columns]
-
+        # calcola correlazione se ci sono almeno 50 righe in comune in cui i campioni non sono NaN
         corr = sample.corr(min_periods=50)
 
         fig, ax = plt.subplots(figsize=(12, 10))
@@ -82,7 +97,9 @@ class NCI60Visualizer(BaseVisualizer):
         plt.close(fig)
 
     def plot_preprocessed_data(self, df: pd.DataFrame) -> None:
-        """Grafici dedicati al dataset preprocessato (Step 02 - formato Wide/QC Ready)."""
+        """
+        Grafici dedicati al dataset preprocessato
+        """
         y_cols = [c for c in df.columns if c.startswith("y_")]
         has_qc_data = "stress_2d" in df.columns or "split" in df.columns or len(y_cols) > 0
 
@@ -91,7 +108,7 @@ class NCI60Visualizer(BaseVisualizer):
 
         logger.info("Rilevato dataset preprocessato: avvio grafici post-filtering e QPU mapping...")
 
-        # 1. Distribuzione dello Stress 2D di Kruskal (Vincolo Atomi Neutri)
+        # distribuzione dello Stress 2D di Kruskal (layout ad atomi neutri 2D)
         if "stress_2d" in df.columns:
             fig, ax = plt.subplots(figsize=(8, 5))
             sns.histplot(df["stress_2d"], bins=30, kde=True, color="teal", ax=ax)
@@ -106,7 +123,7 @@ class NCI60Visualizer(BaseVisualizer):
             plt.close(fig)
             logger.info(f"Grafico Stress 2D salvato in: {save_path}")
 
-        # 2. Bilanciamento degli Split (Murcko Scaffold)
+        # bilanciamento degli Split (Murcko Scaffold)
         if "split" in df.columns:
             fig, ax = plt.subplots(figsize=(6, 4))
             sns.countplot(data=df, x="split", hue="split", palette="viridis", legend=False, ax=ax)
@@ -119,15 +136,15 @@ class NCI60Visualizer(BaseVisualizer):
             plt.close(fig)
             logger.info(f"Grafico Scaffold Split salvato in: {save_path}")
 
-        # 3. Bilanciamento Attivi/Inattivi per le Linee Target (y_*)
+        # bilanciamento Attivi/Inattivi per le Linee Target (y_*)
         if y_cols:
-            # Se ci sono troppi task, prendiamo solo quelli con dati effettivi o limitiamo la visualizzazione
+            # se ci sono troppi task, prendiamo solo quelli con dati effettivi o limitiamo la visualizzazione
             df_y = df[y_cols].melt(var_name="Task", value_name="Label").dropna()
             df_y["Task"] = df_y["Task"].str.replace("y_", "")
             df_y["Stato"] = df_y["Label"].map({1.0: "Attivo", 0.0: "Inattivo"})
 
-            # Se ci sono troppi task, ordiniamo per frequenza o prendiamo i principali per pulizia visiva
-            top_tasks = df_y["Task"].value_counts().index[:15] # Mostra al massimo i primi 15 più popolati se sono tanti
+            # se ci sono troppi task, mostra al massimo i primi 15 più popolati se sono tanti
+            top_tasks = df_y["Task"].value_counts().index[:15] 
             df_y_filtered = df_y[df_y["Task"].isin(top_tasks)]
 
             fig, ax = plt.subplots(figsize=(14, 6))

@@ -12,3 +12,5 @@ datasets:
   
 use_legacy_api_loader: False
 exclude_panels: ["FIB", "LYM", "MIS", "RHT", "SAR", "SCL"]
+
+quantum_cache_dir: ".cache/quantum_fingerprints"

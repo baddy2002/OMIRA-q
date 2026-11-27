@@ -1,6 +1,13 @@
 name: "neutral_atom_hw"
 params:
   min_amplitude: 0.0
-  max_amplitude: 20.0
-  params_per_atom: 1
-  max_atoms: 20
+  max_amplitude: 12.556
+  min_detuning: -125.66
+  max_detuning: 125.66
+  phase_param_size: 1
+  position_param_size: 0
+  waves_size: 16
+  waves_param: 4
+  qubit_min_distance: 5         # us
+  qubit_max_origin_distance: 38        # us
+  max_qubits: 8

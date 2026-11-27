@@ -35,3 +35,19 @@ un revisore teorico ti smonterà il lavoro scrivendo:
   - Ottimizzazione Ibrida: 
         - la GNN estrae le feature topologiche globali della molecola
         - algoritmo di ottimizzazione gradient-free (come CMA-ES o Bayesian Optimization) calcola i parametri ottimali dei impulsi laser per una classe di molecole, mentre la testa classica fa la classificazione fine.
+
+   -implementato surrogato e tentato con parameter shift rule 
+   ma anche con pochi dati (unico batch da 64) la rete quantstica 
+   non riusciva a rappresentare bene i dati
+
+   
+
+https://journals.aps.org/pra/abstract/10.1103/PhysRevA.107.042615
+
+
+https://arxiv.org/html/2403.11931v1#:~:text=The%20ability%20to%20solve%20the%20MIS%20problem,carefully%20choosing%20%CE%B4%20%3E%200%20in%20Eq.
+
+
+
+estrai pesi di fusion_head per vedere il contributo
+del layer quantistico e di quello classico insieme

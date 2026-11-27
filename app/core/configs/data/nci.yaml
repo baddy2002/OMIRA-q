@@ -7,7 +7,7 @@ preprocess:
   chemistry:
     allowed_elements: ["C", "N", "O", "F", "P", "S", "Cl", "Br"]
     n_heavy_min: 8
-    n_heavy_max: 20             # non può essere maggiore di max_atoms negli yaml backend quantistici
+    n_heavy_max: 20             
     max_degree: 4
     value_range: [4.0, 8.0]     # -log10(GI50) min e max fisici
     threshold: 5.0              # Soglia di attivita (10 uM)

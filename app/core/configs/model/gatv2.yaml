@@ -9,10 +9,11 @@ params:
   num_node_features: 12
   num_edge_features: 7
   use_morgan_fingerprint: True
+  use_quantum_fingerprint: False
   fingerprint_n_bits: 16
 training:
-  epochs: 50                # classical: 200
-  lr: 0.001
+  epochs: 100                # classical: 200
+  lr: 0.001                 
   weight_decay: 0.0001      # classical: 0.00001
   patience: 20
   batch_size: 64

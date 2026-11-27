@@ -29,15 +29,14 @@ def main():
     logger.info("=== AVVIO PREPROCESSING E VISUALIZZAZIONE POST-FILTERING PER NCI-60 ===")
     logger.info(f"Log dettagliati salvati in: {log_file_path}")
 
-    # 1. Inizializzazione del configuratore centrale
+    # configurazioni globali
     configger = PipelineConfigger(config_root="app/core/configs")
     paths = configger.paths
     nci_cfg = configger.get_data_config("nci")
 
-    # Assicura che le cartelle definite nel config.yml esistano
+    # se le cartelle definite nel config.yml non esistono creale
     paths["preprocessed_input_dir"].mkdir(parents=True, exist_ok=True)
     paths["preprocessed_output_dir"].mkdir(parents=True, exist_ok=True)
-
     input_file = paths["input_dir"] / "nci60_full_dataset.csv"
 
     if not input_file.exists():
@@ -47,11 +46,11 @@ def main():
         )
         sys.exit(1)
 
-    # 2. Caricamento dataset intermedio dallo Step 1
+    # caricamento dataset intermedio
     logger.info(f"Caricamento dataset intermedio da: {input_file}")
     df_raw = pd.read_csv(input_file, low_memory=False)
 
-    # 3. Esecuzione del Preprocessing (Funnel, RDKit, Conformeri 3D, Stress 2D, Split Scaffold)
+    # esecuzione del Preprocessing (Funnel, RDKit, Conformeri 3D, Stress 2D, Split Scaffold)
     logger.info("Inizializzazione Preprocessor con parametri chimico-quantistici da nci.yaml...")
     preprocessor = NCI60PreProcessor(
         input_dir=str(paths["input_dir"]),

@@ -4,7 +4,8 @@ import yaml
 
 
 class PipelineConfigger:
-    """Configuratore centrale unico per l'intero progetto OMIRA-q.
+    """
+    Configuratore centrale unico per l'intero progetto OMIRA-q.
     Carica config.yml, i dataset in configs/data/ e i modelli in configs/model/.
     """
 
@@ -20,12 +21,22 @@ class PipelineConfigger:
         self._load_all()
 
     def _load_yaml(self, path: Path) -> Dict[str, Any]:
+        """
+        Carica un file yaml dato il path restituendo un dizionario chiave valore
+        """
         if not path.exists():
             raise FileNotFoundError(f"File di configurazione non trovato: {path}")
         with open(path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
 
     def _load_all(self) -> None:
+        """
+        carica nelle variabili tutti i file yaml presenti nelle sottocartelle:
+        self.data_configs: - /configs/data
+        self.model_configs - /configs/model
+        self.backend_configs - /configs/backend
+        in un array di dizionari, dove ogni elemento è un file
+        """
         # carica configurazione globale
         self.global_cfg = self._load_yaml(self.global_config_path)
 
@@ -41,7 +52,7 @@ class PipelineConfigger:
             for yml_file in model_dir.glob("*.yaml"):
                 self.model_configs[yml_file.stem] = self._load_yaml(yml_file)
 
-        # carica configurazioni backend
+        # carica configurazioni core/configs/backend/*.yml
         backend_dir = self.config_root / "backend"
         if backend_dir.exists():
             for yml_file in backend_dir.glob("*.yaml"):
@@ -49,24 +60,32 @@ class PipelineConfigger:
 
     @property
     def paths(self) -> Dict[str, Path]:
-        """Ritorna i path principali del progetto convertiti in oggetti Path."""
+        """
+        ritorna i path principali di I/O del progetto convertiti in oggetti Path.
+        """
         raw_paths = self.global_cfg.get("paths", {})
         return {k: Path(v) for k, v in raw_paths.items()}
 
     def get_data_config(self, dataset_name: str = "nci") -> Dict[str, Any]:
-        """Estrae la configurazione di un dataset specifico (es. 'nci')."""
+        """
+        Estrae la configurazione di un dataset specifico .
+        """
         if dataset_name not in self.data_configs:
             raise KeyError(f"Dataset config '{dataset_name}' non trovata tra: {list(self.data_configs.keys())}")
         return self.data_configs[dataset_name]
 
     def get_model_config(self, model_name: str) -> Dict[str, Any]:
-        """Estrae la configurazione di un modello specifico (es. 'egnn3', 'gatv2', 'xgboost')."""
+        """
+        Estrae la configurazione di un modello specifico.
+        """
         if model_name not in self.model_configs:
             raise KeyError(f"Model config '{model_name}' non trovata tra: {list(self.model_configs.keys())}")
         return self.model_configs[model_name]
 
     def get_backend_config(self, backend_name: str) -> Dict[str, Any]:
-        """Estrae la configurazione legate ad un backend specifico (es. 'classical', 'neutral_atom_sim', 'neutral_atom_hw')."""
+        """
+        Estrae la configurazione legate ad un backend specifico.
+        """
         if backend_name not in self.backend_configs:
             raise KeyError(f"Model config '{backend_name}' non trovata tra: {list(self.backend_configs.keys())}")
         return self.backend_configs[backend_name]    

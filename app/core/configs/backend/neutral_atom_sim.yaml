@@ -1,7 +1,18 @@
 name: "neutral_atom_sim"
 params:
   use_noise: False
-  min_amplitude: 0.0
+  min_amplitude: 2.0
   max_amplitude: 12.566
-  params_per_atom: 1
-  max_atoms: 8
+  min_detuning: -25
+  max_detuning: 25
+  min_detuning_feat: -6.28
+  max_detuning_feat: 6.28
+  waves_size: 32
+  warmup_epochs: 9999
+  waves_param: 3
+  phase_param_size: 1
+  qubit_min_distance: 5         # us
+  qubit_max_origin_distance: 38        # us
+  max_layout_fill_factor: 0.5
+  position_param_size: 0
+  max_qubits: 6

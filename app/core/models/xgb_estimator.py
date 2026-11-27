@@ -10,7 +10,9 @@ from app.core.models.base_estimator import Estimator
 from app.core.models.history import History
 
 class XGBEstimator(Estimator):
-    """Estimator tabulare basato su XGBoost per un confronto baseline non geometrico."""
+    """
+    Estimator tabulare basato su XGBoost per un confronto baseline non geometrico.
+    """
 
     is_neural: bool = False
 
@@ -22,7 +24,6 @@ class XGBEstimator(Estimator):
             "max_depth": 6,
             "random_state": 42
         })
-        # Usiamo XGBClassifier (gestisce nativamente i NaN se passati opportunamente)
         self.models: list[XGBClassifier | None] = []
         self.history = History()
 
@@ -41,6 +42,7 @@ class XGBEstimator(Estimator):
         all_val_losses = []
 
         for i in range(n_tasks):
+            # trova non nulli
             tr_valid = ~np.isnan(y_train[:, i])
             va_valid = ~np.isnan(y_val[:, i]) if val_data is not None else np.zeros(0, dtype=bool)
 
@@ -58,7 +60,7 @@ class XGBEstimator(Estimator):
             )
             self.models.append(model)
 
-            # Estrazione log history se disponibile dalle metriche di eval del modello
+            # estrazione log history se disponibile dalle metriche di eval del modello
             results = model.evals_result()
             if results and "validation_0" in results:
                 metric_name = list(results["validation_0"].keys())[0]
@@ -68,10 +70,10 @@ class XGBEstimator(Estimator):
                     v_metrics = results["validation_1"][metric_name]
                     all_val_losses.append(v_metrics)
 
-        # Se abbiamo tracciato le history, le aggreghiamo (media sui task) e le carichiamo nell'oggetto History
+        #  abbiamo tracciato le history, le aggreghiamo (media sui task) e le carichiamo nell'oggetto History
         if all_train_losses:
             max_len = max(len(l) for l in all_train_losses)
-            # Padding o troncamento per allineare le epoche dei vari task
+            # padding o troncamento per allineare le epoche dei vari task
             padded_train = [np.pad(l, (0, max_len - len(l)), 'edge') for l in all_train_losses]
             mean_train_history = np.mean(padded_train, axis=0)
 

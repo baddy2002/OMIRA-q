@@ -8,5 +8,6 @@ for s in 0 42 123 6 36; do python -m app.scripts.03_classical_train_and_compare 
 python -m app.scripts.04_aggregate_seeds
 
 
+python -m app.scripts.03_classical_train_and_compare --model gatv2 --seed 0 --backend neutral_atom_sim
 
 

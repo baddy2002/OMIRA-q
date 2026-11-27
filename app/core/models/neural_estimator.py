@@ -24,17 +24,40 @@ class NeuralEstimator(Estimator):
         
         lr = config.get("training", {}).get("lr", 1e-3)
         weight_decay = config.get("training", {}).get("weight_decay", 1e-5)
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+        if backend_name == 'classical':
+            self.optimizer = torch.optim.AdamW([
+                # parametri tranne il surrogato
+                {
+                    'params': [p for name, p in model.named_parameters() if 'surrogate_net' not in name],
+                    'lr': lr
+                }
+            ])
+        else:
+            self.optimizer = torch.optim.AdamW([
+                # parametri tranne il surrogato
+                {
+                    'params': [p for name, p in model.named_parameters() if 'surrogate_net' not in name],
+                    'lr': lr
+                },
+                # parametri del surrogato con LR ridotto
+                {
+                    'params': model.surrogate_net.parameters(),
+                    #'lr': (lr*0.1)
+                    'lr': lr
+                }
+            ])
 
         # inizializziamo lo scheduler SOLO se il modello è ibrido/quantistico
         lr_scheduler = None
+        
         if backend_name != 'classical':
             lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, 
-            mode='min',         # Monitoriamo la loss (minima è meglio) o 'max' se monitori una metrica
-            factor=0.5,         # Dimezza il learning rate quando si blocca
-            patience=3         # Numero di epoche di attesa prima di ridurre
-        )
+                self.optimizer, 
+                mode='min',         # Monitoriamo la loss (minima è meglio) o 'max' se monitori una metrica
+                factor=0.5,         # Dimezza il learning rate quando si blocca
+                patience=3         # Numero di epoche di attesa prima di ridurre
+            )
+        
            
         self.trainer = NeuralTrainer(
             model=self.model,

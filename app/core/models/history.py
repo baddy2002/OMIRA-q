@@ -3,7 +3,10 @@ from typing import Dict, List
 
 
 class History:
-    """Contenitore standardizzato per le metriche di training e validation."""
+    """
+    Contenitore standardizzato per le metriche di training
+    e validation dei vari modelli testati
+    """
 
     def __init__(self) -> None:
         self.metrics: Dict[str, List[float]] = {

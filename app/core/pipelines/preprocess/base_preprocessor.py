@@ -1,9 +1,5 @@
 # app/core/pipelines/preprocess/base_preprocessor.py
-"""
-Contratto comune a tutti i dataset. Nessuna dipendenza da RDKit:
-qui ci sono solo gli stadi (astratti), l'orchestrazione run() e
-l'infrastruttura gate/funnel/salvataggio.
-"""
+
 from __future__ import annotations
 
 import hashlib
@@ -19,6 +15,11 @@ REJECT = "reject_reason"
 
 
 class BasePreprocessor(ABC):
+    """
+    Contratto comune a tutti i dataset. Nessuna dipendenza da RDKit
+    definisce solo gli stadi astratti, l'orchestrazione run() e
+    la logica gate/funnel/salvataggio.
+    """
     # colonne non serializzabili (oggetti Mol, array) da togliere dagli scarti
     transient_cols: tuple = ()
 
@@ -33,34 +34,48 @@ class BasePreprocessor(ABC):
     # ---------------- stadi: specifici del dataset ----------------
     @abstractmethod
     def standardize_table(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Una riga per molecola (repliche aggregate). Colonne minime: mol_id, smiles
-        + un valore grezzo per task. Deve popolare self.tasks."""
+        """
+        Una riga per molecola (repliche aggregate). 
+        Colonne minime: mol_id, smiles e gi50 per task. 
+        Deve popolare self.tasks con i tasks scelti
+        """
         ...
 
     @abstractmethod
     def build_labels(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Aggiunge y_<task> in {0, 1, NaN} per ogni task in self.tasks."""
+        """
+        Aggiunge y_<task> in {0, 1, NaN} per classificazione 
+        su ogni task in self.tasks 
+        """
         ...
 
     # ---------------- stadi: dominio molecolare / QC ----------------
     @abstractmethod
     def standardize_molecules(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Parsing, standardizzazione, dedup."""
+        """
+        Parsing, standardizzazione, dedup
+        """
         ...
 
     @abstractmethod
     def filter_molecules(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Filtri economici di fattibilita' (elementi, dimensione, grado...)."""
+        """
+        Filtri economici di fattibilità (elementi, dimensione, grado...)
+        """
         ...
 
     @abstractmethod
     def select_tasks(self, df: pd.DataFrame) -> list[str]:
-        """Sceglie i task (cell line) da tenere."""
+        """
+        Sceglie i task (cell line) da tenere
+        """
         ...
 
     @abstractmethod
     def compute_geometry(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Conformero 3D + validazione dell'embedding 2D (stadio costoso)."""
+        """
+        Conformero 3D + validazione dell'embedding 2D .
+        """
         ...
 
     @abstractmethod
@@ -69,7 +84,9 @@ class BasePreprocessor(ABC):
 
     @abstractmethod
     def split(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Aggiunge la colonna 'split' in {train, val, test}."""
+        """
+        Aggiunge la colonna 'split' {train, val, test} ai dati
+        """
         ...
 
     # ---------------- infrastruttura concreta ----------------
@@ -80,24 +97,18 @@ class BasePreprocessor(ABC):
         reasons: pd.Series,
         stats: dict | None = None,
     ) -> pd.DataFrame:
-        """Filtra le righe in base a un motivo di scarto e registra il passaggio nel funnel.
-
-        Parametri
-        ----------
-        name : str
-            Nome dello stadio, usato nel funnel.
-        df : DataFrame
-            Tabella in ingresso allo stadio.
-        reasons : Series
-            Allineata a df. None = riga valida, stringa = motivo di scarto.
-        stats : dict, opzionale
-            Campi aggiuntivi per il funnel (es. conteggi di modifiche), già calcolati
-            dallo stadio. Non sostituiscono 'in' e 'out', che restano sempre presenti.
-
-        Ritorna
-        -------
-        DataFrame con le sole righe valide, indice ricostruito da zero.
         """
+        Filtra le righe in base a un motivo di scarto e lo registra in un file per tracciabilità.
+
+        name: Nome dello stadio, usato nel funnel.
+        df: Tabella in ingresso allo stadio.
+        reasons: Allineata a df, None = riga valida, stringa = motivo di scarto.
+        stats: Campi aggiuntivi per il file (es. conteggi di campioni modificati ma non eliminati), 
+                non sostituiscono 'in' e 'out', che restano sempre presenti.
+
+        ritorna solo le sole righe valide, indice ricostruito da zero.
+        """
+        #prendi i valori eliminati per qualche motivo (non nullo)
         bad = reasons.notna()
         entry = {
             "step": name,
@@ -105,19 +116,26 @@ class BasePreprocessor(ABC):
             "out": int((~bad).sum()),           # righe che proseguono
             "reasons": reasons[bad].value_counts().to_dict(),  # scarti per motivo
         }
+        # eventuali campi aggiuntivi
         if stats:
             entry.update(stats)
         self.funnel.append(entry)
 
+        # salva i campioni scartati e associa il motivo dello scarto
         if bad.any():
             self.rejected.append(
                 df.loc[bad].drop(columns=list(self.transient_cols), errors="ignore")
                   .assign(**{REJECT: reasons[bad].astype(str)})
             )
+        #ritorna solo i validi con indice resettato
         return df.loc[~bad].reset_index(drop=True)
 
     def drop_unlabeled(self, df: pd.DataFrame, tasks: list[str]) -> pd.DataFrame:
+        """
+        elimina campioni che hanno tutti i task null
+        """
         has = df[[f"y_{t}" for t in tasks]].notna().any(axis=1)
+        # assegna None se ha almeno un task e no_label_in_tasks se has è false
         reasons = pd.Series(np.where(has, None, "no_label_in_tasks"), index=df.index, dtype=object)
         return self.gate("no_label", df, reasons)
 
@@ -125,7 +143,9 @@ class BasePreprocessor(ABC):
         return df
 
     def _make_serializable(self, obj: Any) -> Any:
-        """Converte ricorsivamente Path e tipi non-JSON in tipi nativi."""
+        """
+        Converte ricorsivamente Path e tipi non-JSON in tipi nativi
+        """
         if isinstance(obj, Path):
             return str(obj)
         elif isinstance(obj, dict):
@@ -142,7 +162,8 @@ class BasePreprocessor(ABC):
         reasons: dict | None = None,
         stats: dict | None = None,
     ) -> None:
-        """Registra nel funnel uno stadio che modifica valori ma non scarta righe.
+        """
+        Registra nel funnel uno stadio che modifica valori ma non scarta righe.
 
         Usato per l'esclusione di misure (es. flip di etichetta): 'in' e 'out' contano
         misure, non molecole, e le misure escluse vengono salvate a parte.
@@ -153,15 +174,20 @@ class BasePreprocessor(ABC):
         self.funnel.append(entry)
 
     def save(self, df: pd.DataFrame, tasks: list[str]) -> None:
+        """
+        salva il dataset
+        """
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        #applica trasformazioni necessarie di preprocessing
         self.prepare_for_save(df, tasks).to_parquet(self.output_dir / "molecules.parquet", index=False)
-        
+
+        # stampa i rifiutati in un file a parte per tracciabilità
         if self.rejected:
             pd.concat(self.rejected, ignore_index=True).to_parquet(
                 self.output_dir / "rejected.parquet", index=False
             )
             
-        # Gestione flessibile sia per dict sia per oggetti di configurazione
+        # gestione flessibile config (verranno stampate anche queste per tracciabilità)
         if isinstance(self.cfg, dict):
             raw_cfg = self.cfg
         elif hasattr(self.cfg, "data_configs"):
@@ -170,13 +196,15 @@ class BasePreprocessor(ABC):
             raw_cfg = getattr(self.cfg, "__dict__", str(self.cfg))
 
         cfg_serializable = self._make_serializable(raw_cfg)
-        
+
+        #prepara il manifest con config, tasks, metadati come quantità campioni ottenuti e l'hash delle config 
         manifest = {
             "config": cfg_serializable, 
             "tasks": tasks, 
             "n_final": len(df),
             "config_hash": hashlib.sha256(json.dumps(cfg_serializable, sort_keys=True).encode()).hexdigest()[:12],
         }
+        # scrivi manifest e funnel (tracciabilità dei gates)
         (self.output_dir / "funnel.json").write_text(json.dumps(self.funnel, indent=2))
         (self.output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
@@ -186,7 +214,8 @@ class BasePreprocessor(ABC):
         df = self.standardize_molecules(df)
         df = self.filter_molecules(df)
         tasks = self.select_tasks(df)
-        
+
+        # elimina i task non selezionati
         selected_y_cols = [f"y_{t}" for t in tasks]
         all_y_cols = [c for c in df.columns if c.startswith("y_")]
         cols_to_drop = [c for c in all_y_cols if c not in selected_y_cols]

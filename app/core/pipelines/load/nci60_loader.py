@@ -13,20 +13,26 @@ from app.core.configs.configger import PipelineConfigger
 configger = PipelineConfigger(config_root="app/core/configs")
 logger = logging.getLogger(__name__)
 
-WIDE_COLUMNS = ("NSC", "SMILES")
-
 
 class NCI60Loader(BaseLoader):
-    """Loader DTP per NCI-60 (release ottobre 2026).
+    """
+    Loader DTP per NCI-60 (release ottobre 2026).
 
     Input (in input_dir):
       - GI50.csv              : GI50 per esperimento (una riga per EXPID, NSC, linea)
       - nsc_smiles.csv        : SMILES per NSC
-      - GI50_Cancelled.csv    : esperimenti cancellati per QC, da escludere
+      - GI50_Cancelled.csv    : esperimenti cancellati, da escludere
 
     Output: formato largo, una riga per NSC.
-      Colonne: NSC, SMILES, pGI50_<linea>, cens_hi_<linea>, n_exp_<linea>, std_<linea>
+      Colonne: 
+            NSC             ==> identificativo univoco composto chimico
+            SMILES          ==> struttura bidimensionale e stereochimica molecola
+            pGI50_<linea>   ==> valore della concentrazione del composto/molecola che serve per inibire del 50% la linea tumorale
+            cens_hi_<linea> ==> valore di censura se il composto non ha mai raggiunto il 50% di inibizione
+            n_exp_<linea>   ==> numero di esperimenti totali effettuati per la linea
+            std_<linea>     ==> std degli esperimenti effettuati
     """
+
     __PANEL_TO_PREFIX = {
         "BRE": "BR", "CNS": "CNS", "COL": "CO", "LEU": "LE", "MEL": "ME",
         "LNS": "LC", "OVA": "OV", "PRO": "PR", "REN": "RE",
@@ -50,12 +56,25 @@ class NCI60Loader(BaseLoader):
         self.full_dataset_path = os.path.join(input_dir, full_dataset_name)
         self.activity_threshold = activity_threshold
 
+        # valori da avere per ogni riga
+        self.METRICS = ["pGI50", "cens_hi", "n_exp", "std"]
+        self.WIDE_COLUMNS = ["NSC", "SMILES"]
+
     def load_raw(self) -> pd.DataFrame:
+        """
+        carica dal file i dati degli esperimenti filtrando:
+            1. quelli con una unità di concetrazione diversa dalle moli
+            2. quelli con linee tumorali non incluse nel __PANEL_TO_PREFIX, trasformando le label (legacy complaint)
+            3. quelli che sono stati cancellati (GI50_Cancelled)
+            4. assegna la censura se il composto non ha raggiunto il 50%
+            5. raggruppa per NSC e linea e assegna il valore medio di GI50 (gestione censurati)
+            6. trasforma il dataset in formato largo (1 riga per N linee cellulari)
+        """
         for path in (self.gi50_path, self.smiles_path, self.cancelled_path):
             if not os.path.exists(path):
                 raise FileNotFoundError(f"File mancante: {path}")
 
-        # 1. GI50 per esperimento, solo molare
+        # GI50 per esperimento, solo concentrazione molare per capire quali sono attive e quali no
         gi = pd.read_csv(
             self.gi50_path,
             usecols=[
@@ -67,13 +86,13 @@ class NCI60Loader(BaseLoader):
         gi = gi[gi["CONCENTRATION_UNIT"] == "M"].copy()
         logger.info(f"GI50 righe totali: {n_raw}, in molare: {len(gi)}")
 
-        # esclusione  linee non incluse in __PANEL_TO_PREFIX
+        # esclusione linee non incluse in __PANEL_TO_PREFIX
         if configger.global_cfg.get("exclude_panels"):
             n_before = len(gi)
             gi = gi[~gi["PANEL_CODE"].isin(configger.global_cfg.get("exclude_panels"))].copy()
             logger.info(f"Righe escluse per pannello {configger.global_cfg.get('exclude_panels')}: {n_before - len(gi)}")
 
-        # mappatura PANEL_CODE -> PREFIX
+        # trasformazione label da PANEL_CODE a PREFIX
         gi["PREFIX"] = gi["PANEL_CODE"].map(self.__PANEL_TO_PREFIX)
         n_no_prefix = gi["PREFIX"].isna().sum()
         if n_no_prefix:
@@ -83,21 +102,22 @@ class NCI60Loader(BaseLoader):
         # esclusione esperimenti cancellati
         cancelled = pd.read_csv(self.cancelled_path, usecols=["EXPID", "NSC", "CELL_NAME"])
         cancelled_keys = set(zip(cancelled["EXPID"], cancelled["NSC"], cancelled["CELL_NAME"]))
+        # maschera 0/1 
         is_cancelled = np.array(
-            [(e, n, c) in cancelled_keys for e, n, c in zip(gi["EXPID"], gi["NSC"], gi["CELL_NAME"])],
-            dtype=bool,
-        )
+                    [(e, n, c) in cancelled_keys for e, n, c in zip(gi["EXPID"], gi["NSC"], gi["CELL_NAME"])],
+                    dtype=bool,
+                )
         gi = gi[~np.array(is_cancelled, dtype=bool)].copy()
         logger.info(f"Esperimenti cancellati esclusi: {sum(is_cancelled)}")
 
-        # pGI50 e censura superiore
+        # pGI50 e censura superiore se un compoto (in questo caso GI50 non è noto ma sappiamo l'estremo inferiore)
         gi["pGI50"] = -gi["AVERAGE"]
         gi["cens_hi"] = np.isclose(gi["AVERAGE"], gi["LOG_HI_CONCENTRATION"], atol=1e-4)        
         # formato linea: PREFIX:CELL_NAME
         gi["LINE"] = gi["PREFIX"] + ":" + gi["CELL_NAME"].astype(str)
 
-        #    pGI50: media sugli esperimenti NON censurati; se tutti censurati, media dei bordi
-        #    cens_hi: True solo se TUTTI gli esperimenti sono censurati
+        #  pGI50: media SOLO sugli esperimenti NON censurati
+        #  se tutti censurati, media dei non censurati
         gi["pGI50_unc"] = gi["pGI50"].where(~gi["cens_hi"])
         agg = gi.groupby(["NSC", "LINE"]).agg(
             pGI50_unc=("pGI50_unc", "mean"),
@@ -109,13 +129,16 @@ class NCI60Loader(BaseLoader):
         agg["pGI50"] = agg["pGI50_unc"].fillna(agg["pGI50_all"])
         agg = agg.drop(columns=["pGI50_unc", "pGI50_all"])
 
-        # forma larga: una riga per NSC
-        wide = agg.pivot(index="NSC", columns="LINE", values=["pGI50", "cens_hi", "n_exp", "std"])
+        # trasforma il dataset trasformando le N righe (1 per linea)
+        # in N colonne della stessa riga cambiando i nomi delle colonne in pGI50_LINE
+        wide = agg.pivot(index="NSC", columns="LINE", values=self.METRICS)
         wide.columns = [f"{metric}_{cell}" for metric, cell in wide.columns]
         wide = wide.reset_index()
 
-        # SMILES per NSC (join solo su NSC)
+        # carica NSC e SMILES eliminando duplicati di NSC presenti nel file degli SMILES
         smi = pd.read_csv(self.smiles_path, usecols=["NSC", "SMILES"]).drop_duplicates("NSC")
+
+        # fa il merge solo su NSC tra i dati processati prima e i nuovi ricaricati
         wide = wide.merge(smi, on="NSC", how="left")
         wide = wide[["NSC", "SMILES"] + [c for c in wide.columns if c not in ("NSC", "SMILES")]]
 
@@ -123,12 +146,19 @@ class NCI60Loader(BaseLoader):
         return wide
 
     def check(self, df: pd.DataFrame) -> pd.DataFrame:
-        missing = [c for c in WIDE_COLUMNS if c not in df.columns]
+        """
+        controlla l'elaborazione del dataset, ritorna errore se:
+          - non ci sono le colonne NSC e SMILES
+          - se ci sono duplicati per NSC
+        ELIMINA tutte le righe con SMILES nullo
+        """
+        missing = [c for c in self.WIDE_COLUMNS if c not in df.columns]
         if missing:
             raise ValueError(f"Colonne mancanti: {missing}")
         if df["NSC"].duplicated().any():
             raise ValueError("NSC duplicati nel dataset largo")
 
+        # elimina righe con SMILES nulli
         n_before = len(df)
         df = df.dropna(subset=["SMILES"]).copy()
         logger.info(f"NSC senza SMILES scartati: {n_before - len(df)}")

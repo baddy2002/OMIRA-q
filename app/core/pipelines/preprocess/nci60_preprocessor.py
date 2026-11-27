@@ -29,7 +29,8 @@ class NCI60PreProcessor(BasePreprocessor):
 
     # ---------------- chimica ----------------
     def standardize_molecules(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Parsing, standardizzazione (frammento principale, neutralizzazione) e deduplicazione.
+        """
+        Parsing, standardizzazione (frammento principale, neutralizzazione) e deduplicazione.
 
         Ogni trasformazione viene confrontata con la molecola di partenza, per registrare
         quante molecole cambiano forma. Le modifiche NON scartano righe: sono solo
@@ -38,6 +39,8 @@ class NCI60PreProcessor(BasePreprocessor):
         from rdkit import Chem
         from rdkit.Chem.MolStandardize import rdMolStandardize
 
+        # un farmaco può avere problemi di stabilità a temp. amb. oppure non essere solubile in acqua
+        # tipicamente si trasforma in sale, in questo caso ci saranno due smiles concatenati da un punto, uno per il farmaco uno per il solvente
         chooser = rdMolStandardize.LargestFragmentChooser()
         uncharger = rdMolStandardize.Uncharger()
 
@@ -48,6 +51,7 @@ class NCI60PreProcessor(BasePreprocessor):
 
         for smi in df["smiles"]:
             m = Chem.MolFromSmiles(smi) if isinstance(smi, str) else None
+            # se rdkit non riesce a creare la molecola dallo smiles vuol dire che è invalido
             if m is None:
                 mols.append(None)
                 reasons.append("smiles_invalid")
@@ -57,13 +61,18 @@ class NCI60PreProcessor(BasePreprocessor):
                 continue
 
             try:
-                # 1. frammento principale: rimuove sali e contro-ioni
+                # frammento principale: rimuove sali e contro-ioni
                 m_frag = chooser.choose(m)
-                # 2. neutralizzazione: carbossilato -> acido, ammonio -> ammina, ecc.
+                # neutralizzazione per standardizzare stessi composti che in diversi esperimenti sono stati protonizzati di più/meno
+                # questi composti in soluzione biologica a ph 7.4 saranno uguali perchè l'equilibrio dell'acqua farà raggiungere lo stesso livello di ionizzazione
+                # uncharger attribuisce alla molecola cariche neutre aggiungendo o togliendo ioni H+ senza alterare atomi pesanti
                 m_unch = uncharger.uncharge(m_frag)
-                # 3. verifica di validità chimica
+                # verifica di validità chimica secondo RDKIT (
+                # valenza, conversione forma Kekulizzata in aromatica 
+                # e calcolo delle cariche formali e degli idrogeni impliciti)
                 Chem.SanitizeMol(m_unch)
 
+                #ritrasforma in molecola e confronta se è cambiata
                 s0 = Chem.MolToSmiles(m)
                 s1 = Chem.MolToSmiles(m_frag)
                 s2 = Chem.MolToSmiles(m_unch)
@@ -78,12 +87,14 @@ class NCI60PreProcessor(BasePreprocessor):
                 mols.append(m_unch)
                 reasons.append(None)
             except Exception:
+                # errore nella standardizzazione
                 mols.append(None)
                 reasons.append("standardize_failed")
                 smi_original.append(None)
                 smi_after_frag.append(None)
                 smi_after_uncharge.append(None)
 
+        # tieni le molecole sanitizzate al passo finale
         df = df.assign(mol=mols, smiles_std=smi_after_uncharge)
         df = self.gate(
             "standardize", df,
@@ -94,8 +105,9 @@ class NCI60PreProcessor(BasePreprocessor):
             },
         )
 
-        # --- deduplicazione per InChIKey27 completo ---
-        # L'InChIKey completo restituisce solitamente 27 caratteri (es. AAABBB...-CCC...-N)
+        # L'InChIKey (International Chemical Identifier)
+        # completo restituisce 27 caratteri 
+        # (primi 14 per connettività e scheletro, 10 per stereochimica, 1 carattere per protonizzazione (es N per neutro) e 2 '-' che separano i 3 gruppi)
         df = df.assign(inchikey27=df["mol"].map(lambda m: Chem.MolToInchiKey(m)))
 
         pgi50_cols = [c for c in df.columns if c.startswith("pGI50_")]
@@ -103,6 +115,7 @@ class NCI60PreProcessor(BasePreprocessor):
         nexp_cols = [c for c in df.columns if c.startswith("n_exp_")]
         std_cols = [c for c in df.columns if c.startswith("std_")]
 
+        # conta tutti i gruppi di duplicati per inchikey
         dup_mask = df["inchikey27"].duplicated(keep="first")
         n_dup_groups = int(df.loc[dup_mask, "inchikey27"].nunique())
 
@@ -116,18 +129,18 @@ class NCI60PreProcessor(BasePreprocessor):
             row = {}
             has_conflict_in_group = False
             
-            # Media per i valori pGI50
+            # calcola media per i valori pGI50
             for c in pgi50_cols:
                 vals = g[c].dropna()
                 if vals.empty:
                     row[c] = np.nan
                 else:
-                    row[c] = vals.mean()  # <-- Media anziché il primo valore
+                    row[c] = vals.mean()  
                     if vals.nunique() > 1:
                         n_conflict_cells += 1
                         has_conflict_in_group = True
 
-            # Per i flag di censura (AND logico: se è censurato in tutti/alcuni) o conteggi
+            # per il flag di censura controlla se è censurato in anche solo una volta
             for c in cens_cols:
                 vals = g[c].dropna()
                 row[c] = vals.any() if not vals.empty else np.nan
@@ -144,7 +157,7 @@ class NCI60PreProcessor(BasePreprocessor):
             if has_conflict_in_group:
                 n_conflict_groups += 1
 
-        # Aggiorna la prima riga di ogni gruppo con i valori mediati
+        # aggiorna la prima riga di ogni gruppo con i valori mediati
         for key, row in merged_rows.items():
             idx = df.index[(df["inchikey27"] == key)][0]
             for c, v in row.items():
@@ -161,13 +174,23 @@ class NCI60PreProcessor(BasePreprocessor):
         )
 
     def filter_molecules(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        filtra le molecole in base a:
+         - massimo/minimo numero di atomi pesanti che devono avere 
+         - numero massimo di collegamenti
+         - gli elementi permessi senza atomi troppo strani
+        """
         allowed = set(self.chem_cfg["allowed_elements"])
         n_min = self.chem_cfg["n_heavy_min"]
         n_max = self.chem_cfg["n_heavy_max"]
         max_deg = self.chem_cfg["max_degree"]
 
         def check(m):
+            """
+            restituisce una Series con NONE se la molecola è valida o la reason se non lo è
+            """
             atoms = list(m.GetAtoms())
+            # <= tra due set indica che il primo deve essere un subset del secondo
             if not {a.GetSymbol() for a in atoms} <= allowed:
                 return "element_not_allowed"
             if not (n_min <= len(atoms) <= n_max):
@@ -181,9 +204,11 @@ class NCI60PreProcessor(BasePreprocessor):
 
     # ---------------- task ----------------
     def select_tasks(self, df: pd.DataFrame) -> list[str]:
-        """Sceglie i task (linee cellulari) privilegiando un buon bilanciamento
-        di attivi/inattivi (es. fra 30% e 70%) e massimizzando l'indipendenza informativa (phi).
         """
+        Sceglie i task privilegiando un buon bilanciamento attivi/inattivi 
+        e massimizzando l'indipendenza informativa (phi).
+        """
+        # se i task sono forzati dalle config globali seleziona quelli
         target_override = self.tasks_cfg.get("target_cell_lines")
         if target_override:
             return [t for t in target_override if f"y_{t}" in df.columns]
@@ -191,23 +216,24 @@ class NCI60PreProcessor(BasePreprocessor):
         min_samples = self.tasks_cfg["min_samples_per_task"]
         n_tasks_target = self.tasks_cfg["n_tasks"]
 
-        # 1. Filtriamo i task che hanno almeno min_samples e un bilanciamento accettabile (es. 30% - 70% di attivi)
+        # filtriamo i task che hanno almeno min_samples e un bilanciamento accettabile (30 - 70 di attivi)
         valid_ok_tasks = []
         for t in self.tasks:
             y_col = f"y_{t}"
+            # se non c'è la colonna o se non ha abbastanza valori salta
             if y_col not in df.columns:
                 continue
             series = df[y_col].dropna()
             if len(series) < min_samples:
                 continue
             
-            # Calcola la percentuale di attivi (classe 1)
+            # calcola la percentuale di attivi
             active_ratio = series.mean()
-            # Vincolo di bilanciamento desiderato (es. tra 0.30 e 0.70)
+            # vincolo di bilanciamento (0.30-0.70)
             if 0.30 <= active_ratio <= 0.70:
                 valid_ok_tasks.append(t)
 
-        # Se con i filtri ristretti non troviamo abbastanza task, allarghiamo un po' la forbice (es. 20% - 80%)
+        # se con i filtri ristretti non troviamo abbastanza task, allarghiamo un po' il vincolo di bilanciamento
         if len(valid_ok_tasks) < (n_tasks_target or 1):
             for t in self.tasks:
                 y_col = f"y_{t}"
@@ -217,80 +243,109 @@ class NCI60PreProcessor(BasePreprocessor):
                 if len(series) >= min_samples and 0.20 <= series.mean() <= 0.80:
                     valid_ok_tasks.append(t)
 
-        # Se ancora vuoto, prendiamo quelli con più campioni disponibili
+        # se ancora vuoto, prendiamo quelli con più campioni disponibili
         if not valid_ok_tasks:
             valid_ok_tasks = [t for t in self.tasks if df[f"y_{t}"].notna().sum() >= min_samples]
 
         if n_tasks_target is None or len(valid_ok_tasks) <= n_tasks_target:
             return valid_ok_tasks
 
-        # 2. Selezione greedy basata sulla correlazione (indipendenza informativa) tra i task bilanciati
+        # selezione greedy basata sulla correlazione (indipendenza informativa) tra i task bilanciati
         y_cols = [f"y_{t}" for t in valid_ok_tasks]
         phi = df[y_cols].corr().fillna(0.0)
         phi.index = phi.columns = valid_ok_tasks
 
-        # Partiamo dal task che ha il bilanciamento più vicino al 50% (active_ratio più vicino a 0.5)
+        # partiamo dal task che ha il bilanciamento più vicino al 50%
         best_start = min(valid_ok_tasks, key=lambda t: abs(df[f"y_{t}"].mean() - 0.5))
         chosen = [best_start]
 
         while len(chosen) < n_tasks_target:
             rest = [t for t in valid_ok_tasks if t not in chosen]
-            # Sceglie il task che minimizza la massima correlazione con quelli già scelti (massimizza la diversità)
+            # task con diversità massima dai task scelti 
+            # step 1: (calcola differenza tra ogni task t e i task già scelti s, poi prendi il minimo)
+            # step 2: trova il massimo
             chosen.append(max(rest, key=lambda t: min(1 - abs(phi.loc[t, s]) for s in chosen)))
 
         return chosen
 
     # ---------------- geometria ----------------
     def _conformer_xyz(self, m):
+        """
+        genera coordinate 3D della molecola e
+        restituisce la matrice delle posizioni (x, y, z)
+        """
         from rdkit import Chem
         from rdkit.Chem import AllChem
 
         seed = self.split_cfg["seed"]
+        # per poter calcolare correttamente la geometria 
+        # aggiungiamo esplicitamente gli idrogeni
         mh = Chem.AddHs(m)
+        # costruisce forma 3D secondo proprietà chimiche reali (distanze, angoli possibili, anelli e stereochimica)
         p = AllChem.ETKDGv3()
         p.randomSeed = seed
         if AllChem.EmbedMolecule(mh, p) != 0:
             return None
         try:
+            # minimizza l'energia (tensione legami, angoli e torsioni, vdw ed elettrostatica )
             AllChem.MMFFOptimizeMolecule(mh)
         except Exception:
             pass                                    # Se fallisce MMFF tiene le coordinate ETKDG
-        mh = Chem.RemoveHs(mh)                      # l'ordine degli atomi pesanti non cambia
+                                                    # l'ordine degli atomi pesanti non cambia
+        mh = Chem.RemoveHs(mh)                      
         return mh.GetConformer().GetPositions()
 
     @staticmethod
     def stress_2d(xyz: np.ndarray) -> float:
-        """Stress-1 di Kruskal calcolato tramite ottimizzazione L-BFGS e gradiente analitico.
-        Sostituisce sklearn.MDS evitando problemi di deprecazione e metriche errate."""
+        """
+        Stress-1 di Kruskal calcolato tramite ottimizzazione L-BFGS 
+        e gradiente analitico.
+        """
+        # fino a 3 punti l'embedding 2D è isometricamente esatto
         n = len(xyz)
         if n <= 3:
-            return 0.0  # Fino a 3 punti l'embedding 2D è isometricamente esatto
-        
+            return 0.0  
+
+        # calcola la matrice delle distanze 3D
         d = squareform(pdist(xyz))
+        # denominatore di normalizzazione dello stress
         den = (d ** 2).sum() / 2
         if den == 0:
             return 0.0
-            
+
+        # centra nell'origine
         c = xyz - xyz.mean(0)
+        # svd per proiettare struttura 3D lungo i suoi 2 assi di massima variazione
         y0 = c @ np.linalg.svd(c, full_matrices=False)[2][:2].T
 
         def fg(v):
+            # calcola differenze xy tra due atomi 
             y = v.reshape(n, 2)
-            diff = y[:, None, :] - y[None, :, :]
+            diff = y[:, None, :] - y[None, :, :]    # [n,n,2]
+            # matrice differenze proiettate su spazio 2D
             r = np.sqrt((diff ** 2).sum(-1))
             np.fill_diagonal(r, 1.0)
+            # residuo tra  differenze 2D e 3D
             e = r - d
             np.fill_diagonal(e, 0.0)
+            # ritorna somma dei quadrati degli errori (obiettivo)
+            # e derivata dell'errore rispetto alla posizione
             return (e ** 2).sum() / 2, (2 * (e / r)[:, :, None] * diff).sum(1).ravel()
-
+        # minimizza fg con alg. L-BFGS-B
         res = minimize(fg, y0.ravel(), jac=True, method="L-BFGS-B")
+        # ritorna il valore di stress di kruskal per definizione
         return float(np.sqrt(res.fun / den))
 
     def _stress_2d(self, xyz: np.ndarray) -> float:
         return self.stress_2d(xyz)
     
     def compute_geometry(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        calcola la geometria della molecola e filtra quelle troppo complesse
+        per essere rappresentate su piano 2D
+        """
         max_stress = self.qh_cfg["max_stress_2d"]
+        # rimuovi quelle per cui non è stato possibile calcolare posizioni 3D xyz
         xyz = df["mol"].map(self._conformer_xyz)
         df = df.assign(xyz=xyz)
         df = self.gate(
@@ -298,6 +353,7 @@ class NCI60PreProcessor(BasePreprocessor):
             df, 
             pd.Series(np.where(xyz.isna(), "conformer_failed", None), index=df.index, dtype=object)
         )
+        # rimuovi le molecole non ben rappresentabili su piano 2D
         df = df.assign(stress_2d=df["xyz"].map(self._stress_2d))
         too = df["stress_2d"] > max_stress
         return self.gate(
@@ -308,7 +364,8 @@ class NCI60PreProcessor(BasePreprocessor):
     
     # ---------------- campionamento / split ----------------
     def subsample(self, df: pd.DataFrame, tasks: list[str]) -> pd.DataFrame:
-        """Riduce il dataset a max_molecules, con campionamento stratificato.
+        """
+        Riduce il dataset a max_molecules, con campionamento stratificato.
 
         Gli strati sono la combinazione di numero di atomi pesanti (n_heavy) e
         presenza di almeno un'attività tra i task selezionati. Il campionamento
@@ -321,18 +378,18 @@ class NCI60PreProcessor(BasePreprocessor):
         seed = self.split_cfg["seed"]
 
         if max_mols is None or len(df) <= max_mols:
-            # nessun campionamento necessario: funnel registrato comunque
+            # nessun campionamento necessario
             return self.gate(
                 "subsample", df,
                 pd.Series(None, index=df.index, dtype=object),
                 stats={"requested_max": max_mols, "applied": False},
             )
 
-        # attività: 1 se la molecola è attiva in almeno un task selezionato
+        # true se la molecola è attiva in almeno un task selezionato
         any_active = df[[f"y_{t}" for t in tasks]].fillna(0).max(axis=1).astype(int)
         strata = df["n_heavy"].astype(str) + "_" + any_active.astype(str)
 
-        # campione: indici originali delle righe tenute
+        # indici originali delle righe tenute
         kept_idx = (
             df.assign(_strata=strata)
               .groupby("_strata", group_keys=False)
@@ -356,15 +413,24 @@ class NCI60PreProcessor(BasePreprocessor):
         )
 
     def split(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        crea split del dataset train/eval/test con murcko scaffold
+        """
         from rdkit.Chem.Scaffolds import MurckoScaffold
 
+        # Murcko Scaffold mantiene solo:
+        # - tutti gli anelli 
+        # - i legami di congiunzione tra gli anelli
+        # il resto viene eliminato, diverse molecole con lo stesso nucleo avranno lo stesso scaffold
         scaf = df["mol"].map(lambda m: MurckoScaffold.MurckoScaffoldSmiles(mol=m))
+        # raggruppa per scaffold e metti tutte le molecole nello stesso split (per evitare data leakage)
         groups = sorted(df.groupby(scaf).indices.values(), key=len, reverse=True)
         f_tr, f_va, _ = self.split_cfg["fractions"]
         n, n_tr, n_va = len(df), 0, 0
         split_arr = np.empty(n, dtype=object)
         
         for g in groups:
+            # se i campioni nel train/eval non hanno ancora superato la percentuale richiesta
             if n_tr + len(g) <= f_tr * n:
                 split_arr[g] = "train"
                 n_tr += len(g)
@@ -373,11 +439,12 @@ class NCI60PreProcessor(BasePreprocessor):
                 n_va += len(g)
             else:
                 split_arr[g] = "test"
-                
+
+        # aggiungi le colonne split e scaffold
         return df.assign(scaffold=scaf, split=split_arr)
 
     def prepare_for_save(self, df: pd.DataFrame, tasks: list[str]) -> pd.DataFrame:
-        # Mantieni solo le colonne di base + le y dei soli task selezionati dall'algoritmo greedy
+        # mantieni solo le colonne di base + le y dei soli task selezionati dall'algoritmo greedy
         if tasks is not None:
             valid_task_cols = [f"y_{t}" for t in tasks]
             base_cols = [c for c in df.columns if not c.startswith("y_") or c in valid_task_cols]
@@ -391,49 +458,59 @@ class NCI60PreProcessor(BasePreprocessor):
 
     # ---------------- stadi specifici per NCI-60 ----------------
     def standardize_table(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Formato largo dal loader: una riga per NSC, colonne pGI50_<task>, cens_hi_<task>,
-        n_exp_<task>, std_<task>. Il loader ha già mediato gli esperimenti: qui non si
-        pivota e non si calcola nulla sui valori. Il nome del task è la parte dopo 'pGI50_'
-        (es. 'CNS:SNB-75'), che diventa y_<task> in build_labels.
         """
+        Formato largo dal loader: una riga per NSC, colonne pGI50_<task>, cens_hi_<task>,n_exp_<task>, std_<task>. 
+        controlla i valori siano presenti e il formato sia corretto,
+        salva tutti i tasks e il loro numero
+        """
+        # controllo valori inibizione e NSC e SMILES
         pcols = [c for c in df.columns if c.startswith("pGI50_")]
         if not pcols or not {"NSC", "SMILES"} <= set(df.columns):
             raise ValueError("Formato non riconosciuto: attese colonne NSC, SMILES, pGI50_<task>.")
 
+        # tutti i tasks del dataset
         self.tasks = [c[len("pGI50_"):] for c in pcols]
         out = df.rename(columns={"SMILES": "smiles"}).copy()
         out["mol_id"] = "NSC_" + out["NSC"].astype(str)
+        # logga il numero di tasks prima di tutto il preprocess
         self.record("standardize_table", len(df), len(df), stats={"n_tasks": len(self.tasks)})
         return out
 
 
     def build_labels(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Etichette binarie y_<task> da pGI50_<task> e cens_hi_<task>.
+        """
+        Costruisce etichette binarie y_<task> da pGI50_<task> e cens_hi_<task>.
 
         Per ogni (NSC, linea):
         - valore non censurato fuori da value_range -> NaN (errore di codifica)
         - censurato a concentrazione massima (cens_hi = True):
             pGI50 <= soglia -> 0 (inattivo a tutte le dosi testate)
-            pGI50 >  soglia -> NaN (la dose massima era sotto soglia: non determinabile)
-        - altrimenti etichetta = regola unica is_active (pGI50 > soglia)
+            pGI50 >  soglia -> NaN (la dose massima era sotto soglia, non si può dire se con una concentrazione minore di quella testata ma maggiore della soglia inibisca al 50%)
+        - altrimenti etichetta = regola unica is_active (pGI50 > soglia) ma sempre solo se dentro al range
         I valori pGI50 non vengono mai modificati: si derivano solo le etichette.
         """
+        # valori minimo e massimi che hanno senso per la chimica
         lo, hi = self.chem_cfg["value_range"]
         thr = self.chem_cfg["threshold"]
         out = df.copy()
         n_cells = n_out = n_undet = 0
 
         for task in self.tasks:
+            # carica valore inibizione e maschera binaria cens basata sul valore minore testato
             v = pd.to_numeric(out[f"pGI50_{task}"], errors="coerce")
             cens = out[f"cens_hi_{task}"].astype(str).str.lower().eq("true")
 
+            # true se non censurato ma non è tra i valori min e max
             out_range = v.notna() & ~cens & ~v.between(lo, hi)
+            # true se censurato ma il valore testato era maggiore della soglia
             undet = v.notna() & cens & (v > thr)
 
+            #numeri per loggare nel file tracciabilità 
             n_cells += int(v.notna().sum())
             n_out += int(out_range.sum())
             n_undet += int(undet.sum())
 
+            # controlla se il valore è maggiore o minore della soglia e poi maschera i valori fuori range e indeterminati
             label = self.is_active(v, thr).astype(float).where(v.notna())
             out[f"y_{task}"] = label.mask(out_range | undet)
 
@@ -443,20 +520,20 @@ class NCI60PreProcessor(BasePreprocessor):
             stats={"range": [lo, hi], "threshold": thr},
         )
         return out
-
+    
+    """
     @staticmethod
     def _smiles_or_none(self, m) -> str | None:
-        """SMILES canonico di una molecola, oppure None se la molecola è None."""
+        SMILES canonico di una molecola, oppure None se la molecola è None.
         from rdkit import Chem
         return Chem.MolToSmiles(m) if m is not None else None
-
+    
     def _identity_key(self, smi) -> str | None:
-        """Chiave di identità: InChIKey27 dopo frammento principale e neutralizzazione.
+        Chiave di identità: InChIKey27 dopo frammento principale e neutralizzazione.
 
         È la stessa identità usata dal dedup in standardize_molecules. Serve a decidere
         se due SMILES diversi sono lo stesso composto (stereoisomeri, forme con carica).
         Ritorna None se la SMILES non è standardizzabile.
-        """
         from rdkit import Chem
         from rdkit.Chem.MolStandardize import rdMolStandardize
 
@@ -473,10 +550,11 @@ class NCI60PreProcessor(BasePreprocessor):
             return Chem.MolToInchiKey(m)
         except Exception:
             return None
-
+    """
     @staticmethod
     def is_active(gi50, thr: float):
-        """Regola unica di attività: pGI50 strettamente maggiore della soglia.
+        """
+        Regola di attività: pGI50 strettamente maggiore della soglia.
 
         thr esatto è inattivo (bordo della serie). Arrotondamento a 6 decimali
         per evitare che il rumore di rappresentazione float cambi la classe.

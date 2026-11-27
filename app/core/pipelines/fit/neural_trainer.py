@@ -17,7 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 class NeuralTrainer:
-    """Trainer universale per reti neurali a grafo (GATv2, EGAT) con supporto multi-task e NaN masking."""
+    """
+    trainer universale per reti neurali a grafo (GATv2, EGAT) 
+    con supporto multi-task e NaN masking.
+    """
 
     def __init__(
         self,
@@ -40,7 +43,8 @@ class NeuralTrainer:
 
     @torch.no_grad()
     def _compute_pos_weight(self, loader: DataLoader) -> torch.Tensor:
-        """pos_weight per task = n_negativi / n_positivi, contati sul train (NaN esclusi).
+        """
+        pos_weight per task = n_negativi / n_positivi, contati sul train (NaN esclusi).
 
         Calcolato una sola volta, prima del training, e tenuto fisso.
         """
@@ -76,9 +80,11 @@ class NeuralTrainer:
 
     @torch.no_grad()
     def evaluate(self, loader: DataLoader) -> tuple[float, float]:
-        """Ritorna (val_loss_pesata, val_loss_non_pesata).
+        """
+        ritorna (val_loss_pesata, val_loss_non_pesata).
 
-        La pesata decide il checkpoint; la non pesata serve al confronto con i run precedenti.
+        la pesata decide il checkpoint; 
+        la non pesata serve al confronto con i run precedenti.
         """
         self.model.eval()
         total_w, total_u = 0.0, 0.0
@@ -99,7 +105,10 @@ class NeuralTrainer:
 
     @torch.no_grad()
     def collect_predictions(self, loader: DataLoader) -> tuple[np.ndarray, np.ndarray]:
-        """Predizioni (probabilità) e target del loader, in ordine. Solo per diagnostica."""
+        """
+        predizioni (probabilità) e target del loader, in ordine. 
+        Solo per diagnostica
+        """
         self.model.eval()
         ys, ps = [], []
         for batch in loader:
@@ -120,23 +129,36 @@ class NeuralTrainer:
             self.optimizer.zero_grad()
             
             preds = self.model(batch)
-            targets = batch.y  # Assumendo batch.y con shape [batch_size, n_tasks]
+            targets = batch.y  # shape [batch_size, n_tasks]
             
             loss = self.compute_masked_loss(preds, targets)
             
             loss.backward()
+            projector = getattr(self.model, "position_projector", None)
+            if projector is not None:
+                # Prende il primo layer con pesi del proiettore
+                first_weight = next((p for p in projector.parameters() if p.requires_grad), None)
+                if first_weight is not None and first_weight.grad is not None:
+                    grad_norm = first_weight.grad.norm().item()
+                    grad_max = first_weight.grad.abs().max().item()
+                    logger.info(f"[GRADIENT CHECK] position_projector grad_norm: {grad_norm:.8f} | grad_max: {grad_max:.8f}")
+                else:
+                    logger.warning("[GRADIENT CHECK] position_projector ha gradiente NONE (bloccato!)")
+
+            # Controlliamo anche se la surrogate_net riceve/passa gradiente (se ha parametri)
+            surrogate = getattr(self.model, "surrogate_net", None)
+            if surrogate is not None:
+                surr_weight = next((p for p in surrogate.parameters() if p.requires_grad), None)
+                if surr_weight is not None and surr_weight.grad is not None:
+                    logger.info(f"[GRADIENT CHECK] surrogate_net grad_norm: {surr_weight.grad.norm().item():.8f}")
+           
+            # controlla la norma del gradiente
             if self.max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.max_grad_norm)
             
             self.optimizer.step()
 
-            #if loss.requires_grad:
-                #loss.backward()
-
-                #evita esplosione del gradiente con il clipping
-                #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                #self.optimizer.step()
-                
+            
             total_loss += loss.item()
             n_batches += 1
 
@@ -153,6 +175,8 @@ class NeuralTrainer:
         logger.info(f"Avvio training neurale per {self.epochs} epoche (Device: {self.device})...")
 
         for epoch in range(1, self.epochs + 1):
+            if hasattr(self.model, "current_epoch"):
+                self.model.current_epoch = epoch
             train_loss = self.train_epoch(train_loader)
             val_loss_w, val_loss_u = self.evaluate(val_loader)
             

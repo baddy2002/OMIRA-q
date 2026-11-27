@@ -18,6 +18,8 @@ from sklearn.metrics import roc_auc_score
 
 
 from app.core.configs.configger import PipelineConfigger
+from app.core.features.quantum_fingerprint import compute_quantum_fingerprints
+from app.core.models.nets.surrogate_pulser import SurrogatePulserNet
 from app.core.models.xgb_estimator import XGBEstimator
 from app.core.models.neural_estimator import NeuralEstimator
 from app.core.models.nets.gatv2 import GATv2Net
@@ -43,9 +45,12 @@ logging.basicConfig(
 
 logger = logging.getLogger("Classical_Train_and_Compare")
 
-
 def load_dataset_views(parquet_path: Path):
-    """Carica il parquet preprocessato, legge i task ufficiali dal manifest.json erestituisce i dati divisi per split."""
+    """
+    carica il parquet preprocessato, 
+    legge i task ufficiali e li stampa per tracciabilità
+    restituisce i dati divisi per split per evitare data leakage.
+    """
     df = pd.read_parquet(parquet_path)
     logger.info(f"Dataset caricato da {parquet_path}. Totale righe: {len(df)}")
     
@@ -58,9 +63,10 @@ def load_dataset_views(parquet_path: Path):
 
     return train_df, val_df, test_df, task_cols
 
-
 def compute_morgan_fingerprints(smiles_list: list[str], n_bits: int = 2048, radius: int = 2) -> np.ndarray:
-    """Calcola i Morgan Fingerprints usando il generatore moderno di RDKit."""
+    """
+    Calcola i Morgan Fingerprints usando il generatore di RDKit.
+    """
     from rdkit import Chem
     from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
 
@@ -69,7 +75,7 @@ def compute_morgan_fingerprints(smiles_list: list[str], n_bits: int = 2048, radi
     for smi in smiles_list:
         mol = Chem.MolFromSmiles(smi)
         if mol is not None:
-            # Estrae direttamente l'array numpy dei bit
+            # estrae direttamente l'array numpy dei bit
             arr_np = generator.GetFingerprintAsNumPy(mol).astype(np.float32)
             fps.append(arr_np)
         else:
@@ -78,6 +84,8 @@ def compute_morgan_fingerprints(smiles_list: list[str], n_bits: int = 2048, radi
 
 from rdkit.Chem import rdchem
 
+# quando due atomi si legano formando una molecola gli orbitali atomici 
+# puri (s,p,d ed f) si mescolano dando vita a questi orbitali ibridi:
 _HYBRID_TYPES = [
     rdchem.HybridizationType.SP,
     rdchem.HybridizationType.SP2,
@@ -87,23 +95,24 @@ _HYBRID_TYPES = [
 ]
 
 def featurize_atom(atom) -> list[float]:
-    """Feature di nodo continue (NUM_NODE_FEATURES = 12).
+    """
+    Feature di nodo continue (NUM_NODE_FEATURES = 12).
 
     Ordine:
-      0  numero atomico (normalizzato /100)
-      1  grado (numero di vicini heavy-atom)
-      2  idrogeni totali implicit+explicit (/4)
-      3  carica formale
-      4  radicali elettronici (/2)
-      5  aromatico (0/1)
-      6  in anello (0/1)
-      7-11 ibridazione one-hot: SP, SP2, SP3, SP3D, SP3D2
+      1  numero atomico (normalizzato /100)
+      2  grado (numero di vicini heavy-atom)
+      3  idrogeni totali implicit+explicit (/4)
+      4  carica formale dell'atomo
+      5  radicali elettronici (/2)  (elettrone spaiato, cioè non accoppiato in un legame o in un doppietto elettronico)
+      6  se la molecola è aromatica e ha elettroni delocalizzati (0/1)
+      7  se la molecola è un anello (0/1)
+      8-12 ibridazione one-hot: SP, SP2, SP3, SP3D, SP3D2 (geometria 3D degli orbitali leganti attorno all'atomo)
     """
     hyb = atom.GetHybridization()
     hyb_onehot = [1.0 if hyb == h else 0.0 for h in _HYBRID_TYPES]
     return [
-        atom.GetAtomicNum() / 100.0,
-        float(atom.GetDegree()),
+        atom.GetAtomicNum() / 100.0,  
+        float(atom.GetDegree()),        
         atom.GetTotalNumHs() / 4.0,
         float(atom.GetFormalCharge()),
         atom.GetNumRadicalElectrons() / 2.0,
@@ -112,6 +121,7 @@ def featurize_atom(atom) -> list[float]:
         *hyb_onehot,
     ]
 
+# tipi di legami tra i due atomi
 _BOND_TYPES = [
     rdchem.BondType.SINGLE,
     rdchem.BondType.DOUBLE,
@@ -119,28 +129,148 @@ _BOND_TYPES = [
     rdchem.BondType.AROMATIC,
 ]
 
+# tabella approssimativa delle elettronegatività di Pauling per i principali atomi organici
+_PAULING_EN = {
+    1: 2.20,   # H
+    2: 0.0,    # He
+    3: 0.98,   # Li
+    4: 1.57,   # Be
+    5: 2.04,   # B
+    6: 2.55,   # C
+    7: 3.04,   # N
+    8: 3.44,   # O
+    9: 3.98,   # F
+    10: 0.0,   # Ne
+    11: 0.93,  # Na
+    12: 1.31,  # Mg
+    13: 1.61,  # Al
+    14: 1.90,  # Si
+    15: 2.19,  # P
+    16: 2.58,  # S
+    17: 3.16,  # Cl
+    18: 0.0,   # Ar
+    19: 0.82,  # K
+    20: 1.00,  # Ca
+    21: 1.36,  # Sc
+    22: 1.54,  # Ti
+    23: 1.63,  # V
+    24: 1.66,  # Cr
+    25: 1.55,  # Mn
+    26: 1.83,  # Fe
+    27: 1.88,  # Co
+    28: 1.91,  # Ni
+    29: 1.90,  # Cu
+    30: 1.65,  # Zn
+    31: 1.81,  # Ga
+    32: 2.01,  # Ge
+    33: 2.18,  # As
+    34: 2.55,  # Se
+    35: 2.96,  # Br
+    36: 3.00,  # Kr
+    37: 0.82,  # Rb
+    38: 0.95,  # Sr
+    39: 1.22,  # Y
+    40: 1.33,  # Zr
+    41: 1.6,   # Nb
+    42: 2.16,  # Mo
+    43: 1.9,   # Tc
+    44: 2.2,   # Ru
+    45: 2.28,  # Rh
+    46: 2.20,  # Pd
+    47: 1.93,  # Ag
+    48: 1.69,  # Cd
+    49: 1.78,  # In
+    50: 1.96,  # Sn
+    51: 2.05,  # Sb
+    52: 2.1,   # Te
+    53: 2.66,  # I
+    54: 2.6,   # Xe
+    55: 0.79,  # Cs
+    56: 0.89,  # Ba
+    57: 1.10,  # La
+    58: 1.12,  # Ce
+    59: 1.13,  # Pr
+    60: 1.14,  # Nd
+    61: 1.13,  # Pm
+    62: 1.17,  # Sm
+    63: 1.2,   # Eu
+    64: 1.20,  # Gd
+    65: 1.2,   # Tb
+    66: 1.22,  # Dy
+    67: 1.23,  # Ho
+    68: 1.24,  # Er
+    69: 1.25,  # Tm
+    70: 1.1,   # Yb
+    71: 1.27,  # Lu
+    72: 1.3,   # Hf
+    73: 1.5,   # Ta
+    74: 2.36,  # W
+    75: 1.9,   # Re
+    76: 2.2,   # Os
+    77: 2.20,  # Ir
+    78: 2.28,  # Pt
+    79: 2.54,  # Au
+    80: 2.00,  # Hg
+    81: 1.62,  # Tl
+    82: 2.33,  # Pb
+    83: 2.02,  # Bi
+    84: 2.0,   # Po
+    85: 2.2,   # At
+    86: 2.2,   # Rn
+    87: 0.7,   # Fr
+    88: 0.9,   # Ra
+    89: 1.1,   # Ac
+    90: 1.3,   # Th
+    91: 1.5,   # Pa
+    92: 1.38,  # U
+    93: 1.36,  # Np
+    94: 1.28,  # Pu
+    95: 1.3,   # Am
+    96: 1.3,   # Cm
+    97: 1.3,   # Bk
+    98: 1.3,   # Cf
+    99: 1.3,   # Es
+    100: 1.3,  # Fm
+    101: 1.3,  # Md
+    102: 1.3,  # No
+    103: 1.3,  # Lr
+}
 
 def featurize_bond(bond) -> list[float]:
-    """Feature di arco (NUM_EDGE_FEATURES = 7).
+    """
+    feature di arco (NUM_EDGE_FEATURES = 7).
 
     Ordine:
-      0-3  tipo di legame one-hot: SINGLE, DOUBLE, TRIPLE, AROMATIC
-      4    coniugato (0/1)
-      5    in anello (0/1)
-      6    legame con H implicito o esplicito (0/1)  -- placeholder, vedi nota
+      1-4  tipo di legame one-hot: SINGLE, DOUBLE, TRIPLE, AROMATIC
+      5    coniugato (0/1) (tre o più orbitali p adiacenti sono paralleli e in grado di sovrapporsi parzialmente lungo una catena)
+      6    se è in un anello (0/1)
+      7
+        OLD    legame con H implicito o esplicito (0/1)  
+        NOW    differenza di elettronegatività (scala di Pauling) tra i due atomi (Dice al modello quanto un legame è polarizzato)
     """
     bt = bond.GetBondType()
     bond_onehot = [1.0 if bt == b else 0.0 for b in _BOND_TYPES]
+    # differenza di elettronegatività tra i due atomi
+    atom1 = bond.GetBeginAtom()
+    atom2 = bond.GetEndAtom()
+    en1 = _PAULING_EN.get(atom1.GetAtomicNum(), 2.5)  # default a C se non trovato
+    en2 = _PAULING_EN.get(atom2.GetAtomicNum(), 2.5)
+    en_diff = abs(en1 - en2)
+
+    # normalizzazione per delta massimo teorico ( 4.0 - 0.7 = 3.3)
+    en_diff_normalized = min(en_diff / 3.3, 1.0)
     return [
         *bond_onehot,
         float(bond.GetIsConjugated()),
         float(bond.IsInRing()),
-        0.0,
+        #0.0,   
+       en_diff_normalized,  
     ]
 
-def df_to_pyg_data_list(df: pd.DataFrame, task_cols: list[str], model_name: str = "gatv2") -> list[Data]:
-    """Converte il DataFrame in oggetti PyG Data con feature di nodo, arco, coordinate 3D
-    e supporto opzionale per le Fingerprint di Morgan e Data Augmentation 3D (SO(3)) mirata per EGAT.
+def df_to_pyg_data_list(df: pd.DataFrame, task_cols: list[str], model_name: str = "gatv2", backend_name: str = "neutral_atom_sim") -> list[Data]:
+    """
+    converte il DataFrame in oggetti PyG Data con feature di nodo, arco, coordinate 3D
+    e supporto opzionale per le Fingerprint di Morgan/quantistiche e Data Augmentation 3D (SO(3)) mirata per EGAT.
     """
     from rdkit import Chem
 
@@ -148,24 +278,36 @@ def df_to_pyg_data_list(df: pd.DataFrame, task_cols: list[str], model_name: str 
     n_random_pos = 0
     
     gcfg = configger.get_model_config(model_name)
-    p = gcfg.get("params", {})
-    
-    # Recupero sicuro dei parametri (controlla sia in params che nella radice del config)
+    p: dict = gcfg.get("params", {})
+    if backend_name != "classical":
+        bcfg = configger.get_backend_config(backend_name)
+        pb = bcfg.get("params", {})
+        p.update(pb)  # unisce i parametri del modello e del backend
+    # recupero dei parametri
     expected_node_f = p.get("num_node_features", 12)
     expected_edge_f = p.get("num_edge_features", 7)
     
     use_fp = p.get("use_morgan_fingerprint", gcfg.get("use_morgan_fingerprint", False))
-    n_bits = p.get("fingerprint_n_bits", gcfg.get("fingerprint_n_bits", 2048))
+    n_bits = p.get("fingerprint_n_bits", gcfg.get("fingerprint_n_bits", 16))
     radius = p.get("fingerprint_radius", gcfg.get("fingerprint_radius", 2))
 
     
-    # --- SUPPORTO MORGAN FINGERPRINT ---
+    # morgan fingerprints
     fps = None
     if use_fp:
         fps = compute_morgan_fingerprints(df["smiles"].tolist(), n_bits=n_bits, radius=radius)
-    # -----------------------------------
- 
-    for idx, row in df.iterrows():
+    
+    # --- QUANTUM FINGERPRINT ---
+    use_q_fp = p.get("use_quantum_fingerprint", gcfg.get("use_quantum_fingerprint", False))
+    q_fps = None
+    if use_q_fp:
+        # funzione che calcola offline (o carica da cache su disco) il vettore di feature per ogni molecola
+        # passiamo l'intera lista di smiles o il df
+        logger.info(f"Calcolo/Caricamento Quantum Fingerprint per {len(df)} molecole...")
+        q_fps = compute_quantum_fingerprints(df["smiles"].tolist(), p)
+    # ----------------------------------------------------------------
+
+    for row_pos, (idx, row) in enumerate(df.iterrows()):
         smi = row["smiles"]
         mol = Chem.MolFromSmiles(smi)
         if mol is None:
@@ -216,10 +358,14 @@ def df_to_pyg_data_list(df: pd.DataFrame, task_cols: list[str], model_name: str 
 
         # oggetto Data di base da passare ai modelli
         data_kwargs = {"x": x, "edge_index": edge_index, "edge_attr": edge_attr, "pos": pos, "y": y}
-        # Se la configurazione richiede la fingerprint, la includiamo nel batch PyG usando l'indice corretto del dataframe
+        # se la configurazione richiede la fingerprint, la includiamo nel batch PyG usando l'indice corretto del dataframe
         if use_fp and fps is not None:
             data_kwargs["fingerprint"] = torch.tensor(fps[idx], dtype=torch.float)
 
+        # fingerprint quantum
+        if use_q_fp and q_fps is not None:
+            data_kwargs["quantum_fingerprint"] = torch.tensor(q_fps[row_pos], dtype=torch.float)
+        
         data_list.append(Data(**data_kwargs))
 
     logger.info(f"df_to_pyg_data_list: {len(data_list)}/{len(df)} grafi costruiti (Fingerprint attive: {use_fp})")
@@ -263,7 +409,8 @@ def multitask_ranking_metrics(
     task_names: list[str],
     k: int = 50,
 ) -> dict:
-    """Metriche orientate alla selezione di molecole da testare, per task e mediate.
+    """
+    metriche orientate alla selezione di molecole da testare, per task e mediate.
 
     - precision@k: frazione di attivi tra le k molecole con probabilità più alta
     - enrichment@k: precision@k diviso per la prevalenza del task nel set di valutazione
@@ -284,8 +431,11 @@ def multitask_ranking_metrics(
             out["per_task"][t] = None
             continue
 
+        
         prevalence = float(yt.mean())
+        # k molecole con punteggio di previsione più alto
         top_idx = np.argsort(-yp)[:k]
+        # calcola la percentuale di attive reali presenti in quel grupp
         precision_k = float(yt[top_idx].mean())
         enrichment_k = precision_k / prevalence if prevalence > 0 else float("nan")
         ap = float(average_precision_score(yt, yp))
@@ -326,10 +476,10 @@ def set_seed(seed: int) -> None:
 def parse_args():
     p = argparse.ArgumentParser(description="Training di un modello con un seed")
     p.add_argument("--model", required=True, choices=["xgboost", "gatv2", "egnn3", "dmpnn"], help="modello da addestrare")
-    p.add_argument("--backend", required=True, choices=["classical", "neutral_atom_sim", "neutral_atom_hw"], help="backend da usare")
+    p.add_argument("--backend", required=True, choices=["classical", "neutral_atom_sim", "neutral_atom_hw", "dwave_sim"], help="backend da usare")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--k", type=int, nargs="+", default=[50, 100],
-                   help="budget di molecole testabili, uno o più valori")
+                   help="budget di molecole testabili per report, uno o più valori")
     return p.parse_args()
 
 
@@ -374,7 +524,7 @@ def run_xgboost(train_df, val_df, test_df, task_cols, seed: int):
     X_val = compute_morgan_fingerprints(val_df["smiles"].tolist(), n_bits, radius)
     X_test = compute_morgan_fingerprints(test_df["smiles"].tolist(), n_bits, radius)
 
-    xcfg["params"]["random_state"] = seed  # vedi nota su XGBEstimator
+    xcfg["params"]["random_state"] = seed  
     est = XGBEstimator(xcfg)
     est.fit(
         (X_train, train_df[task_cols].to_numpy()),
@@ -383,14 +533,39 @@ def run_xgboost(train_df, val_df, test_df, task_cols, seed: int):
     est.save(configger.paths["models_output_dir"] / f"xgboost_seed{seed}")
     return est.predict_proba(X_test), None
 
-def define_target_neural_net(model_name: str = "gatv2", backend_name: str = "classical") -> torch.nn.Module:
+def load_surrogate_net(input_dim, bp, p):
+    """Carica il surrogato da usare nel train in warmup e in bw per derivabilità"""
+    surrogate_net = SurrogatePulserNet(input_dim=input_dim, num_qubits=bp['max_qubits'], hidden_dim=p["hidden_dim"])
+    surrogate_weights_path = Path("data/output/models/surrogate_weights.pt")
+    if surrogate_weights_path.exists():
+        state_dict = torch.load(surrogate_weights_path)        
+        surrogate_net.load_state_dict(state_dict)
+        # Congeliamo i pesi del surrogato così non si muovono durante il training della GNN
+        for param in surrogate_net.parameters():
+            param.requires_grad = True
+
+        # Mettilo in eval mode (così LayerNorm e Dropout non mutano lo stato)
+        #surrogate_net.eval()
+        logger.info("Modello surrogato caricato e congelato con successo nella GATv2!")
+    else:
+        logger.warning("ATTENZIONE: Pesi del surrogato non trovati! Ricordati di far girare lo script 05.")
+    return surrogate_net
+
+def define_target_neural_net(model_name: str = "gatv2", backend_name: str = "classical", dataset_name: str = 'nci') -> torch.nn.Module:
     """Definisce l'architettura della rete neurale target in base al nome del modello."""
     gcfg = configger.get_model_config(model_name)
     bcfg = configger.get_backend_config(backend_name)
+    ncicfg = configger.get_data_config(dataset_name)
     p = gcfg["params"]
-
-    logger.info(f"Using backend type: {bcfg.get("name", 'classical')}")
-
+    bp = bcfg["params"]
+    surrogate_net=None
+    logger.info(f"Using backend type: {backend_name}")
+    if backend_name != 'classical':
+        # l'input del surrogato dipende dalla dimensione delle waveform non dei parametri con cui li calcola la gnn
+        input_dim=(bp['waves_size']*2+bp['phase_param_size'])*ncicfg['preprocess']['chemistry']['n_heavy_max'] 
+        # aggiungi le posizioni
+        input_dim += bp['max_qubits']*2
+        surrogate_net = load_surrogate_net(input_dim, bp, p)
     if model_name == "gatv2":
         return GATv2Net(
             num_node_features=p["num_node_features"],
@@ -399,10 +574,13 @@ def define_target_neural_net(model_name: str = "gatv2", backend_name: str = "cla
             num_layers=p["num_layers"],
             heads=p["heads"],
             num_tasks=p["num_tasks"],
+            surrogate_net = surrogate_net,
             dropout=p["dropout"],
             use_morgan_fingerprint=p.get("use_morgan_fingerprint", False),
             fingerprint_n_bits=p.get("fingerprint_n_bits", 256),
-            backend_config=bcfg
+            backend_config=bcfg,
+            use_hybrid=False,
+            use_quantum_fingerprint=p.get("use_quantum_fingerprint", False)
         )
     elif model_name == "egnn3":
         return EGNNNet(
@@ -432,15 +610,15 @@ def define_target_neural_net(model_name: str = "gatv2", backend_name: str = "cla
     else:
         raise ValueError(f"Modello neurale non supportato: {model_name}")
 
-def run_neural(train_df, val_df, test_df, task_cols, seed: int, model_name: str, backend_name: str):
+def run_neural(train_df, val_df, test_df, task_cols, seed: int, model_name: str, backend_name: str, dataset_name: str):
     gcfg = configger.get_model_config(model_name)
     p = gcfg["params"]
     batch_size = gcfg.get("training", {}).get("batch_size", 64)
 
     # costruzione delle liste PyG Data base
-    train_data_list = df_to_pyg_data_list(train_df, task_cols, model_name)
-    val_data_list = df_to_pyg_data_list(val_df, task_cols, model_name)
-    test_data_list = df_to_pyg_data_list(test_df, task_cols, model_name)
+    train_data_list = df_to_pyg_data_list(train_df, task_cols, model_name, backend_name)
+    val_data_list = df_to_pyg_data_list(val_df, task_cols, model_name, backend_name)
+    test_data_list = df_to_pyg_data_list(test_df, task_cols, model_name, backend_name)
 
     if model_name == "egnn3":
         # num_aug_per_mol=1 raddoppia i dati: 11.308 originali + 11.308 ruotati/jitterati = 22.616 campioni
@@ -456,7 +634,7 @@ def run_neural(train_df, val_df, test_df, task_cols, seed: int, model_name: str,
     val_loader = DataLoader(val_data_list, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_data_list, batch_size=batch_size, shuffle=False)
 
-    net = define_target_neural_net(model_name, backend_name)
+    net = define_target_neural_net(model_name, backend_name, dataset_name)
     est = NeuralEstimator(
         net,
         gcfg,
@@ -488,7 +666,7 @@ def main():
     if args.model == "xgboost":
         preds, history = run_xgboost(train_df, val_df, test_df, task_cols, args.seed)
     else:
-        preds, history = run_neural(train_df, val_df, test_df, task_cols, args.seed, args.model, args.backend)
+        preds, history = run_neural(train_df, val_df, test_df, task_cols, args.seed, args.model, args.backend, 'nci')
 
     report = ranking_report(y_test, preds, task_cols, args.k)
     report.update({"model": args.model, "seed": args.seed, "k_values": args.k})
