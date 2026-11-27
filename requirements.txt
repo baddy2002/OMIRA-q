@@ -1,9 +1,4 @@
 absl-py==2.3.1
-aider-install==0.2.0
-aiodns @ file:///Users/ec2-user/croot/aiodns_1790173896876/work
-aiohappyeyeballs @ file:///Users/ec2-user/croot/aiohappyeyeballs_1780647000861/work
-aiohttp==3.13.3
-aiosignal @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_e3cjtbh902/croot/aiosignal_1755870814211/work
 alembic==1.17.2
 anaconda-anon-usage @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_3eler6mjxh/croot/anaconda-anon-usage_1710965076906/work
 annotated-doc==0.0.4
@@ -58,7 +53,7 @@ dill==0.4.0
 diskcache==5.6.3
 distro @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_ddkyz0575y/croot/distro_1714488254309/work
 emu-base==2.11.2
-emu-mps==2.11.2
+emu-sv==2.11.2
 et_xmlfile==2.0.0
 executing==2.2.1
 fastapi==0.128.8
@@ -304,6 +299,7 @@ tinyhtml5==2.0.0
 tokenizers==0.22.2
 tomlkit==0.13.3
 torch==2.15.0
+torch-geometric==2.8.1
 torchaudio==2.11.1
 torchvision==0.29.2
 tornado==6.5.2
