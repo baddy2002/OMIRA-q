@@ -234,7 +234,7 @@ class PulserFunction():#torch.autograd.Function):
                     prefer_device_noise_model=True,
                     observables=[StateResult()],
                     #observables=[BitStrings(num_shots=50)],
-                    options={"nsteps": 50000},
+                    #options={"nsteps": 50000},
                 )
             else:
                 return SVConfig(

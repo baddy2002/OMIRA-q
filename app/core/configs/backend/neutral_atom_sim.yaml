@@ -7,7 +7,7 @@ params:
   max_detuning: 25
   min_detuning_feat: -6.28
   max_detuning_feat: 6.28
-  waves_size: 32
+  waves_size: 16
   warmup_epochs: 9999
   waves_param: 3
   phase_param_size: 1
