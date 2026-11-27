@@ -1,12 +1,11 @@
 absl-py==2.3.1
 alembic==1.17.2
-anaconda-anon-usage @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_3eler6mjxh/croot/anaconda-anon-usage_1710965076906/work
 annotated-doc==0.0.4
 annotated-types==0.8.0
 anyio==4.12.1
 appdirs==1.4.4
 appnope==0.1.4
-archspec @ file:///croot/archspec_1709217642129/work
+archspec
 argon2-cffi==25.1.0
 argon2-cffi-bindings==25.1.0
 arrow==1.4.0
@@ -24,8 +23,8 @@ backrefs==6.1
 beautifulsoup4==4.14.3
 bleach==6.3.0
 blinker==1.9.0
-boltons @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/boltons_1699240838368/work
-Brotli @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_27zk0eqdh0/croot/brotli-split_1714483157007/work
+boltons
+Brotli
 cachetools==6.2.1
 certifi==2026.11.20
 cffi==2.1.1
@@ -33,13 +32,13 @@ charset-normalizer==3.5.3
 click==8.3.1
 colorama==0.4.3
 comm==0.2.3
-conda @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_527jk_262g/croot/conda_1736277825834/work
-conda-content-trust @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_9fusbfzixa/croot/conda-content-trust_1714483157715/work
-conda-libmamba-solver @ file:///croot/conda-libmamba-solver_1727775630457/work/src
-conda-package-handling @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_ef9phnqphe/croot/conda-package-handling_1718138279942/work
-conda_package_streaming @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_6dgq200203/croot/conda-package-streaming_1718136087190/work
+conda
+conda-content-trust
+conda-libmamba-solver
+conda-package-handling
+conda_package_streaming
 ConfigArgParse==1.7.1
-contourpy @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_contourpy_1789746846/work
+contourpy
 cryptography==50.0.2
 cssselect2==0.8.0
 cycler==0.12.1
@@ -51,7 +50,7 @@ diastatic-malt==2.15.2
 diff-match-patch==20241021
 dill==0.4.0
 diskcache==5.6.3
-distro @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_ddkyz0575y/croot/distro_1714488254309/work
+distro
 emu-base==2.11.2
 emu-sv==2.11.2
 et_xmlfile==2.0.0
@@ -65,28 +64,28 @@ Flask==3.1.3
 flatbuffers==25.9.23
 fonttools==4.69.1
 fqdn==1.5.1
-freetype-py @ file:///home/conda/feedstock_root/build_artifacts/freetype-py_1650983368720/work
-frozendict @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_8b0cest_id/croot/frozendict_1713194839836/work
-frozenlist @ file:///opt/miniconda3/conda-bld/frozenlist_1761062014285/work
-fsspec @ file:///Users/ec2-user/croot/fsspec_1791453638405/work
+freetype-py
+frozendict
+frozenlist
+fsspec
 gast==0.6.0
 ghp-import==2.1.0
 gitdb==4.0.12
 GitPython==3.1.46
-gmpy2 @ file:///Users/ec2-user/croot/gmpy2_1786359503985/work
+gmpy2
 google-pasta==0.2.0
 gpxpy==1.4.2
 grep-ast==0.9.0
 grpcio==1.76.0
 h11==0.16.0
-h2 @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_h2_1785796355/work
+h2
 h5py==3.15.1
 hf-xet==1.2.0
-hpack @ file:///home/conda/feedstock_root/build_artifacts/hpack_1782283902770/work
+hpack
 httpcore==1.0.9
 httpx==0.28.1
 huggingface_hub==1.4.1
-hyperframe @ file:///home/conda/feedstock_root/build_artifacts/hyperframe_1737618333194/work
+hyperframe
 ibm-cloud-sdk-core==3.24.2
 ibm-platform-services==0.70.0
 idna==3.20
@@ -105,7 +104,7 @@ Jinja2==3.1.6
 jiter==0.13.0
 joblib==1.5.3
 json5==0.13.0
-jsonpatch @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_3ajyoz8zoj/croot/jsonpatch_1714483362270/work
+jsonpatch
 jsonpointer==2.1
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
@@ -132,7 +131,7 @@ langgraph-sdk==0.2.9
 langsmith==0.4.38
 lark==1.3.1
 libclang==18.1.1
-libmambapy @ file:///Users/runner/miniforge3/conda-bld/mamba-split_1749642130770/work/libmambapy
+libmambapy
 litellm==1.81.10
 lxml==6.1.1
 Mako==1.3.10
@@ -144,7 +143,7 @@ matplotlib-inline==0.2.1
 mccabe==0.7.0
 mdit-py-plugins==0.6.1
 mdurl==0.1.2
-menuinst @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_ad321a45td/croot/menuinst_1723567614652/work
+menuinst
 mergedeep==1.3.4
 mistune==3.1.4
 mixpanel==5.0.0
@@ -156,7 +155,7 @@ mkdocs-pdf-export-plugin==0.5.10
 ml_dtypes==0.5.3
 mpmath==1.3.0
 mslex==1.3.0
-multidict @ file:///Users/ec2-user/croot/multidict_1789378940375/work
+multidict
 multiprocess==0.70.16
 munkres==1.1.4
 namex==0.1.0
@@ -188,16 +187,16 @@ PennyLane-qiskit==0.43.0
 pennylane_lightning==0.43.0
 pexpect==4.9.0
 pillow==13.0.0
-platformdirs @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/platformdirs_1701803010714/work
+platformdirs
 plotly==6.6.0
-pluggy @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pluggy_1764896838/work
+pluggy
 posthog==7.8.6
 prettytable==3.17.0
 prometheus_client==0.23.1
 prompt_toolkit==3.0.52
 propcache==0.4.1
 protobuf==6.33.0
-psutil @ file:///Users/ec2-user/croot/psutil_1784875182473/work
+psutil
 ptyprocess==0.7.0
 pulser==1.10.1
 pulser-core==1.10.1
@@ -205,12 +204,12 @@ pulser-pasqal==0.20.6
 pulser-simulation==1.10.1
 pure_eval==0.2.3
 pyarrow==22.0.0
-pybind11 @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/pybind11-split_1699238010162/work
-pybind11-global @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/pybind11-split_1699238010162/work
+pybind11
+pybind11-global
 pycairo==1.29.2
-pycares @ file:///Users/ec2-user/croot/pycares_1774524229450/work
+pycares
 pycodestyle==2.14.0
-pycosat @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_19qelmdbl6/croot/pycosat_1714510743067/work
+pycosat
 pycparser==3.12
 pydantic==2.14.4
 pydantic-settings==2.12.0
@@ -223,11 +222,11 @@ PyJWT==2.15.1
 pymdown-extensions==10.17.2
 pymodbus==2.5.3
 pypandoc==1.16.2
-pyparsing @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pyparsing_1790063282/work
+pyparsing
 pyperclip==1.11.0
 pyphen==0.17.2
 pyserial==3.5
-PySocks @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/pysocks_1699237568675/work
+PySocks
 pyspnego==0.12.0
 pytest==9.0.2
 python-dateutil==2.9.0.post0
@@ -243,11 +242,11 @@ qiskit==2.1.2
 qiskit-aer==0.17.2
 qiskit-ibm-runtime==0.41.1
 qutip==5.3.1
-rdkit @ file:///Users/runner/miniforge3/conda-bld/rdkit-meta_1791223404686/work
+rdkit
 referencing==0.37.0
 regex==2026.1.15
-reportlab @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_reportlab_1787251752/work
-requests @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_requests_1778851103/work
+reportlab
+requests
 requests-mock==1.12.1
 requests-toolbelt==1.0.0
 requests_ntlm==1.3.0
@@ -255,10 +254,10 @@ rfc3339-validator==0.1.4
 rfc3986-validator==0.1.1
 rfc3987-syntax==1.1.0
 rich==14.3.2
-rlPyCairo @ file:///home/conda/feedstock_root/build_artifacts/rlpycairo_1756864152814/work
+rlPyCairo
 rpds-py==2026.9.1
-ruamel.yaml @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_35yvtl3p84/croot/ruamel.yaml_1727980165481/work
-ruamel.yaml.clib @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_70l_orv46q/croot/ruamel.yaml.clib_1727769819918/work
+ruamel.yaml
+ruamel.yaml.clib
 ruckig==0.15.3
 rustworkx==0.17.1
 safetensors==0.6.2
@@ -273,14 +272,14 @@ sentry-sdk==2.58.0
 setuptools==84.2.1
 shellingham==1.5.4
 shtab==1.8.0
-six @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_six_1753199211/work
+six
 smmap==5.0.2
 sniffio==1.3.1
 socksio==1.0.0
 sounddevice==0.5.5
 soundfile==0.13.1
 soupsieve==2.8.3
-SQLAlchemy @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_sqlalchemy_1791443424/work
+SQLAlchemy
 stack-data==0.6.3
 starlette==0.52.1
 stevedore==5.5.0
@@ -311,13 +310,13 @@ tree-sitter-c-sharp==0.23.1
 tree-sitter-embedded-template==0.25.0
 tree-sitter-language-pack==0.13.0
 tree-sitter-yaml==0.7.2
-truststore @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/truststore_1701805928787/work
+truststore
 typer==0.23.0
 typer-slim==0.23.0
 typing-inspection==0.4.5
-typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing_extensions_1783002732/work
+typing_extensions
 tzdata==2026.6
-unicodedata2 @ file:///Users/runner/miniforge3/conda-bld/unicodedata2_1789928031440/work
+unicodedata2
 uri-template==1.3.0
 urllib3==2.8.0
 uv==0.11.25
@@ -335,7 +334,7 @@ wrapt==2.0.0
 xgboost==3.4.1
 xlsxwriter==3.2.9
 xxhash==3.6.0
-yarl @ file:///Users/ec2-user/croot/yarl_1782227689896/work
+yarl
 zipp==3.23.0
 zopfli==0.4.0
 zstandard==0.25.0
