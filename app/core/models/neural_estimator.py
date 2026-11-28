@@ -41,11 +41,11 @@ class NeuralEstimator(Estimator):
                     'lr': lr
                 },
                 # parametri del surrogato con LR ridotto
-                {
-                    'params': model.surrogate_net.parameters(),
+                #{
+                    #'params': model.surrogate_net.parameters(),
                     #'lr': (lr*0.1)
-                    'lr': lr
-                }
+                    #'lr': lr
+                #}
             ])
 
         # inizializziamo lo scheduler SOLO se il modello è ibrido/quantistico

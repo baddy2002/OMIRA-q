@@ -42,7 +42,7 @@ class PulserClassifierLayer(nn.Module):
         self.params_per_node = 2*self.waves_param + self.phase_param_size
 
         self.device = AnalogDevice
-        logger.debug(f"Device specifications: {self.device.specs}")
+        logger.info(f"Device specifications: {self.device.specs}")
 
     def forward(self, x_projected, mask=None, qubit_positions=None):
         """

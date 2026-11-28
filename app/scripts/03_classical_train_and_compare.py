@@ -538,15 +538,19 @@ def load_surrogate_net(input_dim, bp, p):
     surrogate_net = SurrogatePulserNet(input_dim=input_dim, num_qubits=bp['max_qubits'], hidden_dim=p["hidden_dim"])
     surrogate_weights_path = Path("data/output/models/surrogate_weights.pt")
     if surrogate_weights_path.exists():
-        state_dict = torch.load(surrogate_weights_path)        
-        surrogate_net.load_state_dict(state_dict)
-        # Congeliamo i pesi del surrogato così non si muovono durante il training della GNN
-        for param in surrogate_net.parameters():
-            param.requires_grad = True
+        try:
+            state_dict = torch.load(surrogate_weights_path)        
+            surrogate_net.load_state_dict(state_dict)
+            # Congeliamo i pesi del surrogato così non si muovono durante il training della GNN
+            for param in surrogate_net.parameters():
+                param.requires_grad = True
 
-        # Mettilo in eval mode (così LayerNorm e Dropout non mutano lo stato)
-        #surrogate_net.eval()
-        logger.info("Modello surrogato caricato e congelato con successo nella GATv2!")
+            # Mettilo in eval mode (così LayerNorm e Dropout non mutano lo stato)
+            #surrogate_net.eval()
+            logger.info("Modello surrogato caricato e congelato con successo nella GATv2!")
+        except Exception as e:
+            surrogate_net = None
+            logger.error(f"Errore nel caricamento dei pesi del surrogato: {e}")
     else:
         logger.warning("ATTENZIONE: Pesi del surrogato non trovati! Ricordati di far girare lo script 05.")
     return surrogate_net

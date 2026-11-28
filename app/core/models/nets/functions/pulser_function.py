@@ -133,82 +133,86 @@ class PulserFunction():#torch.autograd.Function):
         else:
             mask_np = np.asarray(atom_mask_sample) 
         num_nodes = int(mask_np.sum().item())
-        
+       
         # iteriamo i nodi della gat e applichiamo per ognuno un impulso 
         # la cui ampiezza è dettata esclusivamente dalla feature del rispettivo nodo GNN.
-        for i in range(num_nodes):
-            pulse = PulserFunction._build_pulse(
-                i,
-                seq,
-                mask_el=mask_np[i], 
-                features_el=features_np[i], 
-                waves_size=waves_size,
-                min_amplitude=min_amplitude,
-                max_amplitude=max_amplitude,
-                min_detuning=min_detuning,
-                max_detuning=max_detuning,
-                local_channel_name=local_channel_name, 
-                phase_param_size=phase_param_size, 
-                num_nodes=num_nodes
-            )
+        
+        pulse = PulserFunction._build_pulse(
+            seq,
+            mask=mask_np, 
+            features=features_np, 
+            waves_size=waves_size,
+            min_amplitude=min_amplitude,
+            max_amplitude=max_amplitude,
+            min_detuning=min_detuning,
+            max_detuning=max_detuning,
+            local_channel_name=local_channel_name, 
+            phase_param_size=phase_param_size, 
+            num_nodes=num_nodes
+        )
             
-            if local_channel_name is not None: 
-                seq.add(pulse, 'local_rydberg')
+        if local_channel_name is not None: 
+            seq.add(pulse, 'local_rydberg')
 
-            else: 
-                seq.add(pulse, 'rydberg_global')
+        else: 
+            seq.add(pulse, 'rydberg_global')
         return seq
 
     @staticmethod
-    def _build_pulse(target_qubit: int, seq: Sequence, mask_el, features_el, waves_size, min_amplitude, max_amplitude, min_detuning, max_detuning, local_channel_name, phase_param_size, num_nodes):
-        safe_amp, safe_det, safe_phase = None, None, None
-        amp_waveform, det_waveform = None, None
-        is_real_node = bool(mask_el)
+    def _build_pulse( seq: Sequence, mask, features, waves_size, min_amplitude, max_amplitude, min_detuning, max_detuning, local_channel_name, phase_param_size, num_nodes):
+        all_amps = []
+        all_dets = []
+        all_phases = []
+        for target_qubit in range(num_nodes):
+            safe_amp, safe_det, safe_phase = None, None, None
+            amp_waveform, det_waveform = None, None
+            is_real_node = bool(mask[target_qubit])
 
-        if is_real_node:
-            # parametri nodo i-esimo
-            feat_node = features_el
+            if is_real_node:
+                # parametri nodo i-esimo
+                feat_node = features[target_qubit]
+                
+                # meno di 3 parametri 
+                if waves_size <= 1:
+                    amp_scalar = float(feat_node[0]) if feat_node.size > 0 else 0.0
+                    det_scalar = float(feat_node[1]) if feat_node.size > 1 else 0.0
+                    phase_scalar = float(feat_node[2]) if feat_node.size > 2 else 0.0
+                    safe_amp = np.clip(amp_scalar, min_amplitude, max_amplitude)
+                    safe_det = np.clip(det_scalar, min_detuning, max_detuning)
+                    safe_phase = np.clip(phase_scalar, -6.28, 6.28) #radianti
+                elif waves_size % 4 == 0:
+                    raw_amp_values = feat_node[:waves_size] # primi N valori
+                    raw_det_values = feat_node[waves_size : 2 * waves_size] # N valori in mezzo
+                    raw_phase_values = feat_node[2*waves_size: 2*waves_size+phase_param_size] # ultimo valore phase
+                    amp_values = np.clip(raw_amp_values, min_amplitude, max_amplitude) 
+                    det_values = np.clip(raw_det_values, min_detuning, max_detuning)
+                    phase_values = np.clip(raw_phase_values, -6.28, 6.28)
+                    
+                else: 
+                    raise ValueError("Numero di parametri deve essere minore di 3 o divisibile per 4")
 
-            # meno di 3 parametri 
-            if waves_size <= 1:
-                amp_scalar = float(feat_node[0]) if feat_node.size > 0 else 0.0
-                det_scalar = float(feat_node[1]) if feat_node.size > 1 else 0.0
-                phase_scalar = float(feat_node[2]) if feat_node.size > 2 else 0.0
-                safe_amp = np.clip(amp_scalar, min_amplitude, max_amplitude)
-                safe_det = np.clip(det_scalar, min_detuning, max_detuning)
-                safe_phase = np.clip(phase_scalar, -6.28, 6.28) #radianti
-            elif waves_size % 4 == 0:
-                raw_amp_values = feat_node[:waves_size] # primi N valori
-                raw_det_values = feat_node[waves_size : 2 * waves_size] # N valori in mezzo
-                raw_phase_values = feat_node[2*waves_size: 2*waves_size+phase_param_size] # ultimo valore phase
-                amp_values = np.clip(raw_amp_values, min_amplitude, max_amplitude) 
-                det_values = np.clip(raw_det_values, min_detuning, max_detuning)
-                phase_values = np.clip(raw_phase_values, -6.28, 6.28)
-                amp_waveform = CustomWaveform(amp_values)
-                det_waveform = CustomWaveform(det_values)
-                safe_phase = float(phase_values[0] if phase_values.size > 0 else 0.0)
-            else: 
-                raise ValueError("Numero di parametri deve essere minore di 3 o divisibile per 4")
-        else:
-            # altrimenti spegniamo il laser (ampiezza = 0.0) così non disturba la simulazione
-            if waves_size <= 1:
-                safe_amp = 0.0
-                safe_det = 0.0
-                safe_phase = 0.0
-            elif waves_size % 4 == 0:
-                amp_values = np.zeros(waves_size)
-                det_values = np.zeros(waves_size)
-                amp_waveform = CustomWaveform(amp_values)
-                det_waveform = CustomWaveform(det_values)
-                safe_phase = 0.0
+                all_amps.append(amp_values)
+                all_dets.append(det_values)
             else:
-                raise ValueError("Numero di parametri deve essere minore di 3 o divisibile per 4")
+                # altrimenti spegniamo il laser (ampiezza = 0.0) così non disturba la simulazione
+                if waves_size <= 1:
+                    safe_amp = 0.0
+                    safe_det = 0.0
+                    safe_phase = 0.0
+                elif waves_size % 4 == 0:
+                    amp_values = np.zeros(waves_size)
+                    det_values = np.zeros(waves_size)
+                    all_amps.append(amp_values)
+                    all_dets.append(det_values)
+                else:
+                    raise ValueError("Numero di parametri deve essere minore di 3 o divisibile per 4")
 
-        if local_channel_name is not None:
-            # spostiamo il target del canale laser sul k-esimo atomo
-            seq.target(f"atom_{target_qubit}", 'local_rydberg')
+            if local_channel_name is not None:
+                # spostiamo il target del canale laser sul k-esimo atomo
+                seq.target(f"atom_{target_qubit}", 'local_rydberg')
 
-        if amp_waveform is None:
+        
+        if waves_size <= 1:
             slot_duration = max(16, (1000 // max(1, num_nodes)) // 4 * 4) # Minimo 16 ns, multiplo di 4
             pulse = Pulse.ConstantPulse(
                 duration=slot_duration,
@@ -217,6 +221,11 @@ class PulserFunction():#torch.autograd.Function):
                 phase=safe_phase
             )
         else: 
+            full_amp = np.concatenate(all_amps)  # Es. 18 * 16 = 288 ns totali
+            full_det = np.concatenate(all_dets)
+            amp_waveform = CustomWaveform(full_amp)
+            det_waveform = CustomWaveform(full_det)
+            safe_phase = float(phase_values[0] if phase_values.size > 0 else 0.0)
             pulse = Pulse(
                 amplitude=amp_waveform,
                 detuning=det_waveform,
@@ -233,16 +242,17 @@ class PulserFunction():#torch.autograd.Function):
                     noise_model=noise_model,
                     prefer_device_noise_model=True,
                     observables=[StateResult()],
+                    log_level=logging.WARNING
                     #observables=[BitStrings(num_shots=50)],
                     #options={"n_steps": 50000},
-                    dt=10,  # Passo di discretizzazione in ns (default è 10 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
+                    #dt=10,  # Passo di discretizzazione in ns (default è 10 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
                 )
             else:
                 return SVConfig(
                     observables=[StateResult()],
+                    log_level=logging.WARNING
                     #observables=[BitStrings(num_shots=50)],
                     #options={"n_steps": 50000},   
-                    dt=10,  # Passo di discretizzazione in ns (default è 1 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
                 )
         else:
             raise NotImplementedError("Real QPU training not implemented")
