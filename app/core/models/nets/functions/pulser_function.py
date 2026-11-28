@@ -5,14 +5,16 @@ import logging
 import concurrent.futures
 from functools import partial
 from pulser import Register, Sequence, Pulse
-from pulser.backend import NoiseModel, StateResult
+from pulser.backend import NoiseModel
 from pulser.backend import BitStrings
-from emu_sv import SVBackend, SVConfig
+from emu_sv import SVBackend, SVConfig, StateResult
 from pulser.register import RectangularLatticeLayout
 from pulser.waveforms import CustomWaveform
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 
 from app.core.utils import backend
-from app.core.utils.parallel_utils import ExecutorSingleton
+from app.core.utils.parallel_utils import ExecutorSingleton, GPUProcessPoolSingleton
 
 logger = logging.getLogger("PulserFunction")
 
@@ -193,6 +195,7 @@ class PulserFunction():#torch.autograd.Function):
 
                 all_amps.append(amp_values)
                 all_dets.append(det_values)
+                all_phases.append(float(phase_values[0]) if phase_values.size > 0 else 0.0)
             else:
                 # altrimenti spegniamo il laser (ampiezza = 0.0) così non disturba la simulazione
                 if waves_size <= 1:
@@ -202,8 +205,10 @@ class PulserFunction():#torch.autograd.Function):
                 elif waves_size % 4 == 0:
                     amp_values = np.zeros(waves_size)
                     det_values = np.zeros(waves_size)
+                    phase_values = np.zeros(phase_param_size)
                     all_amps.append(amp_values)
                     all_dets.append(det_values)
+                    all_phases.append(float(phase_values[0]) if phase_values.size > 0 else 0.0)
                 else:
                     raise ValueError("Numero di parametri deve essere minore di 3 o divisibile per 4")
 
@@ -223,13 +228,22 @@ class PulserFunction():#torch.autograd.Function):
         else: 
             full_amp = np.concatenate(all_amps)  # Es. 18 * 16 = 288 ns totali
             full_det = np.concatenate(all_dets)
+
+            # Espandiamo la fase di ogni nodo per la durata waves_size e smussiamo i bordi
+            expanded_phases = np.repeat(all_phases, waves_size)
+            # Unwrap evita salti artificiali di 2*pi tra -3.14 e +3.14
+            unwrapped_phases = np.unwrap(expanded_phases)
+            # Derivata discreta (rad/ns -> rad/us moltiplicando per 1000, unità di detuning in Pulser)
+            phase_detuning_shift = np.gradient(unwrapped_phases) * 1000.0
+            # Sommiamo il contributo di fase al detuning e clippiamo ai limiti fisici del canale
+            full_det_eff = np.clip(full_det - phase_detuning_shift, min_detuning, max_detuning)
+
             amp_waveform = CustomWaveform(full_amp)
-            det_waveform = CustomWaveform(full_det)
-            safe_phase = float(phase_values[0] if phase_values.size > 0 else 0.0)
+            det_waveform = CustomWaveform(full_det_eff)
             pulse = Pulse(
                 amplitude=amp_waveform,
                 detuning=det_waveform,
-                phase=safe_phase
+                phase=0.0 #fase fissa come vuole pulser
             )
         return pulse
 
@@ -241,7 +255,7 @@ class PulserFunction():#torch.autograd.Function):
                 return SVConfig(
                     noise_model=noise_model,
                     prefer_device_noise_model=True,
-                    observables=[StateResult()],
+                    observables=[StateResult(evaluation_times=[1.0])],
                     log_level=logging.WARNING
                     #observables=[BitStrings(num_shots=50)],
                     #options={"n_steps": 50000},
@@ -279,13 +293,15 @@ class PulserFunction():#torch.autograd.Function):
         config = PulserFunction.build_sv_config(backend_name, noise_model)
         backend = SVBackend(sequence=seq, config=config, mimic_qpu=True)
         results = backend.run()
-        logger.debug(f"results: {results}")
-        if hasattr(results, "get_final_state"):
-            result = results.get_final_state()
+        if hasattr(results, "final_state"):
+            state_obj = results.final_state
+        elif hasattr(results, "get_final_state"):
+            state_obj = results.get_final_state()
         else:
-            result = results.get_result("state", 1.0)
-
-        return PulserFunction.extract_statevector_features(result, num_qubits)
+            state_obj = results.get_result("state", 1.0)
+        
+          
+        return PulserFunction.extract_statevector_features(state_obj, num_qubits)
 
     @staticmethod
     def extract_single_result(string_counts, num_qubits):
@@ -313,7 +329,7 @@ class PulserFunction():#torch.autograd.Function):
         ctx.pulser_device = device
         """
 
-        executor = ExecutorSingleton.get_executor(max_workers=8)
+        
         if torch.isnan(x_projected).any() or torch.isinf(x_projected).any():
             logger.warning("ATTENZIONE: Trovati NaN o Inf nelle feature proiettate dalla GNN!")
         
@@ -341,35 +357,24 @@ class PulserFunction():#torch.autograd.Function):
         mask_np = mask.detach().cpu().numpy()
         qubit_pos_np = qubit_positions.detach().cpu().numpy()
         if not is_gpu:
+            executor = ExecutorSingleton.get_executor(max_workers=8)
             logger.info(f"--- [FORWARD QPU/SIM] Esecuzione parallela su CPU (max_workers={executor._max_workers}) ---")
             outputs = PulserFunction.handle_cpu_forward(
                 batch_size, x_proj_np, mask_np, qubit_pos_np, device, backend_params, waves_size, phase_param_size, backend_name, noise_model, num_qubits, qubit_max_origin_distance, qubit_min_distance, max_layout_fill_factor, executor
             )
         else:
-            logger.info(f"--- [FORWARD QPU/SIM] Esecuzione sequenziale su GPU (device={classical_device}) ---")
-            outputs = []
-            for b in range(batch_size):
-                res = PulserFunction.simulate_single(
-                    x_projected_sample=x_proj_np[b],
-                    mask_sample=mask_np[b],
-                    device=device,
-                    backend_params=backend_params,
-                    waves_size=waves_size,
-                    phase_param_size=phase_param_size,
-                    backend_name=backend_name,
-                    noise_model=noise_model,
-                    num_qubits=num_qubits,
-                    qubit_positions_embedding_sample=qubit_pos_np[b],
-                    qubit_max_origin_distance=qubit_max_origin_distance,
-                    qubit_min_distance=qubit_min_distance,
-                    max_layout_fill_factor=max_layout_fill_factor
-                )
-                outputs.append(res)
-                logger.debug(f"[FORWARD] Completata molecola {b+1}/{batch_size} | mean_prob: {np.mean(res):.3f}")
+            gpu_pool = GPUProcessPoolSingleton.get_executor(max_workers=4)
+            logger.info(f"--- [FORWARD QPU/SIM] Esecuzione parallela su GPU (max_workers={gpu_pool._max_workers}) ---")
+
+            outputs = PulserFunction.handle_gpu_forward(
+                batch_size, x_proj_np, mask_np, qubit_pos_np, device, backend_params, waves_size, phase_param_size, backend_name, noise_model, num_qubits, qubit_max_origin_distance, qubit_min_distance, max_layout_fill_factor, gpu_pool
+            )
+
         out_tensor = torch.tensor(np.array(outputs), device=x_projected.device, dtype=torch.float32)
         #ctx.save_for_backward(x_projected, mask, qubit_positions, out_tensor)
         return out_tensor
 
+    @staticmethod
     def handle_cpu_forward(batch_size, x_proj_np, mask_np, qubit_pos_np, device, backend_params, waves_size, phase_param_size, backend_name, noise_model, num_qubits, qubit_max_origin_distance, qubit_min_distance, max_layout_fill_factor, executor):
         tasks = []
         for b in range(batch_size):
@@ -412,6 +417,41 @@ class PulserFunction():#torch.autograd.Function):
             raise RuntimeError(f"errore inaspettato nel forward pass del layer di classificazione pulser:  {e}")
         return outputs
 
+    @staticmethod
+    def _simulate_single_worker(kwargs):
+        return PulserFunction.simulate_single(**kwargs)
+
+    @staticmethod
+    def handle_gpu_forward(batch_size, x_proj_np, mask_np, qubit_pos_np, device, backend_params, waves_size, phase_param_size, backend_name, noise_model, num_qubits, qubit_max_origin_distance, qubit_min_distance, max_layout_fill_factor, gpu_pool):
+        tasks_kwargs = [
+            dict(
+                x_projected_sample=x_proj_np[b],
+                mask_sample=mask_np[b],
+                device=device,
+                backend_params=backend_params,
+                waves_size=waves_size,
+                phase_param_size=phase_param_size,
+                backend_name=backend_name,
+                noise_model=noise_model,
+                num_qubits=num_qubits,
+                qubit_positions_embedding_sample=qubit_pos_np[b],
+                qubit_max_origin_distance=qubit_max_origin_distance,
+                qubit_min_distance=qubit_min_distance,
+                max_layout_fill_factor=max_layout_fill_factor,
+            )
+            for b in range(batch_size)
+        ]
+
+        logger.info(f"--- [FORWARD QPU/SIM] Inizio simulazione Batch (Totale: {batch_size} molecole) ---")
+        try:
+            outputs = list(gpu_pool.map(PulserFunction._simulate_single_worker, tasks_kwargs))
+            completed = len(outputs)
+            last_res = outputs[-1]
+            logger.info(f"[FORWARD] Completate {completed}/{batch_size} molecole ({(completed/batch_size)*100:.1f}%) | Ultimo mean_prob: {np.mean(last_res):.3f}")
+        except Exception as e:
+            logger.error(f"unexpected error: {e}")
+            raise RuntimeError(f"errore inaspettato nel forward pass del layer di classificazione pulser:  {e}")
+        return outputs
     
     @staticmethod
     def extract_statevector_features(final_state, num_qubits):
@@ -419,28 +459,69 @@ class PulserFunction():#torch.autograd.Function):
         Estrae il reservoir quantistico: sia le probabilità a singolo corpo <n_i>
         sia le correlazioni a due corpi <n_i n_j> (entanglement / Rydberg blockade footprint).
         """
-        probs_dict = final_state.probabilities() if hasattr(final_state, "probabilities") else {}
-        
-        #  dizionario standard delle probabilità degli stati di base
-        single_probs = np.zeros(num_qubits, dtype=np.float32)
-        two_body = np.zeros((num_qubits, num_qubits), dtype=np.float32)
-        
-        for state_str, p in probs_dict.items():
-            if p <= 1e-7:
-                continue
-            clean_str = state_str.replace("|", "").replace(">", "").replace(",", "").strip()
-            bits = [1 if c in ('1', 'r', 'R') else 0 for c in clean_str[:num_qubits]]
+        if hasattr(final_state, "probabilities"):
+            probs_dict = final_state.probabilities() if hasattr(final_state, "probabilities") else {}
             
-            # 1-corpo
-            for i in range(num_qubits):
-                if bits[i] == 1:
-                    single_probs[i] += p
-                    
-            # 2-corpi
-            for i in range(num_qubits):
-                for j in range(i + 1, num_qubits):
-                    if bits[i] == 1 and bits[j] == 1:
-                        two_body[i, j] += p
+            #  dizionario standard delle probabilità degli stati di base
+            single_probs = np.zeros(num_qubits, dtype=np.float32)
+            two_body = np.zeros((num_qubits, num_qubits), dtype=np.float32)
+            
+            for state_str, p in probs_dict.items():
+                if p <= 1e-7:
+                    continue
+                clean_str = state_str.replace("|", "").replace(">", "").replace(",", "").strip()
+                bits = [1 if c in ('1', 'r', 'R') else 0 for c in clean_str[:num_qubits]]
+                
+                # 1-corpo
+                for i in range(num_qubits):
+                    if bits[i] == 1:
+                        single_probs[i] += p
+                        
+                # 2-corpi
+                for i in range(num_qubits):
+                    for j in range(i + 1, num_qubits):
+                        if bits[i] == 1 and bits[j] == 1:
+                            two_body[i, j] += p
+
+        else:
+            if hasattr(final_state, "data"):
+                vec = final_state.data
+            elif hasattr(final_state, "vector"):
+                vec = final_state.vector
+            else:
+                vec = final_state
+
+            if hasattr(vec, "detach"):
+                probs_flat = (vec.abs() ** 2).detach().cpu().numpy().ravel()
+            else:
+                probs_flat = (np.abs(np.asarray(vec)) ** 2).ravel()
+
+            # numero effettivo di atomi nello statevector (es. 2^6 = 64 -> n_active = 6)
+            n_active = int(round(np.log2(probs_flat.size)))
+
+            # Controlla l'ordine degli autostati in emu-sv: di default eigenstates=('r', 'g'),
+            # quindi indice 0 = 'r' (eccitato) e indice 1 = 'g' (ground).
+            eigenstates = getattr(final_state, "eigenstates", ("r", "g"))
+            r_idx = 0 if str(eigenstates[0]).lower() in ("r", "1") else 1
+
+            # Reshape a tensore N-dimensionale (2, 2, ..., 2): un asse per ogni atomo
+            probs_tensor = probs_flat.reshape((2,) * n_active)
+
+            single_probs = np.zeros(num_qubits, dtype=np.float32)
+            two_body = np.zeros((num_qubits, num_qubits), dtype=np.float32)
+
+            limit = min(n_active, num_qubits)
+            # Somma su tutti gli assi tranne i (probabilità marginale 1-corpo <n_i>)
+            for i in range(limit):
+                axes_to_sum = tuple(ax for ax in range(n_active) if ax != i)
+                single_probs[i] = probs_tensor.sum(axis=axes_to_sum)[r_idx]
+
+            # Somma su tutti gli assi tranne (i, j) (correlazione 2-corpi <n_i n_j>)
+            for i in range(limit):
+                for j in range(i + 1, limit):
+                    axes_to_sum = tuple(ax for ax in range(n_active) if ax not in (i, j))
+                    # Con i < j, nel risultato 2x2 l'asse 0 corrisponde a i e l'asse 1 corrisponde a j
+                    two_body[i, j] = probs_tensor.sum(axis=axes_to_sum)[r_idx, r_idx]
 
         # Estraiamo la parte triangolare superiore delle coppie (15 valori per 6 qubit)
         upper_pairs = []
