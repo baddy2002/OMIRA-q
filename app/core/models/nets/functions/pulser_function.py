@@ -235,14 +235,14 @@ class PulserFunction():#torch.autograd.Function):
                     observables=[StateResult()],
                     #observables=[BitStrings(num_shots=50)],
                     #options={"n_steps": 50000},
-                    dt=1,  # Passo di discretizzazione in ns (default è 10 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
+                    dt=10,  # Passo di discretizzazione in ns (default è 10 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
                 )
             else:
                 return SVConfig(
                     observables=[StateResult()],
                     #observables=[BitStrings(num_shots=50)],
                     #options={"n_steps": 50000},   
-                    dt=1,  # Passo di discretizzazione in ns (default è 1 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
+                    dt=10,  # Passo di discretizzazione in ns (default è 1 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
                 )
         else:
             raise NotImplementedError("Real QPU training not implemented")
