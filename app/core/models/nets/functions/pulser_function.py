@@ -256,15 +256,16 @@ class PulserFunction():#torch.autograd.Function):
                     noise_model=noise_model,
                     prefer_device_noise_model=True,
                     observables=[StateResult(evaluation_times=[1.0])],
-                    log_level=logging.WARNING
+                    log_level=logging.WARNING,
                     #observables=[BitStrings(num_shots=50)],
                     #options={"n_steps": 50000},
-                    #dt=10,  # Passo di discretizzazione in ns (default è 10 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
+                    dt=16,  # Passo di discretizzazione in ns (default è 10 ns; abbassa a 4 o 5 se hai impulsi molto rapidi, alza a 20 per velocizzare)
                 )
             else:
                 return SVConfig(
                     observables=[StateResult()],
-                    log_level=logging.WARNING
+                    log_level=logging.WARNING,
+                    dt=16,
                     #observables=[BitStrings(num_shots=50)],
                     #options={"n_steps": 50000},   
                 )
@@ -365,7 +366,6 @@ class PulserFunction():#torch.autograd.Function):
         else:
             gpu_pool = GPUProcessPoolSingleton.get_executor(max_workers=4)
             logger.info(f"--- [FORWARD QPU/SIM] Esecuzione parallela su GPU (max_workers={gpu_pool._max_workers}) ---")
-
             outputs = PulserFunction.handle_gpu_forward(
                 batch_size, x_proj_np, mask_np, qubit_pos_np, device, backend_params, waves_size, phase_param_size, backend_name, noise_model, num_qubits, qubit_max_origin_distance, qubit_min_distance, max_layout_fill_factor, gpu_pool
             )
@@ -444,7 +444,9 @@ class PulserFunction():#torch.autograd.Function):
 
         logger.info(f"--- [FORWARD QPU/SIM] Inizio simulazione Batch (Totale: {batch_size} molecole) ---")
         try:
-            outputs = list(gpu_pool.map(PulserFunction._simulate_single_worker, tasks_kwargs))
+            num_workers = 4
+            chunk = max(1, batch_size // num_workers)
+            outputs = list(gpu_pool.map(PulserFunction._simulate_single_worker, tasks_kwargs, chunksize=chunk))
             completed = len(outputs)
             last_res = outputs[-1]
             logger.info(f"[FORWARD] Completate {completed}/{batch_size} molecole ({(completed/batch_size)*100:.1f}%) | Ultimo mean_prob: {np.mean(last_res):.3f}")
